@@ -1,0 +1,47 @@
+name: market_scan_app
+description: Market Scan Retail POS System
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
+  fl_chart: ^0.70.2
+  google_fonts: ^6.2.1
+  provider: ^6.1.2
+  shared_preferences: ^2.3.3
+  cupertino_icons: ^1.0.8
+  google_mlkit_barcode_scanning: ^0.12.0
+  camera: ^0.11.0
+  sqflite: ^2.3.0
+  path_provider: ^2.1.0
+  http: ^1.2.0
+  path: ^1.9.0
+  audioplayers: ^6.0.0
+  vibration: ^3.1.8
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/logo.png"
+  adaptive_icon_background: "#ffffff"
+  adaptive_icon_foreground: "assets/images/logo.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/sounds/

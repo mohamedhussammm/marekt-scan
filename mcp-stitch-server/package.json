@@ -1,0 +1,25 @@
+{
+  "name": "mcp-stitch-server",
+  "version": "1.0.0",
+  "description": "Local MCP server that bridges to Google Stitch API",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "mcp-stitch": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node src/test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "node-fetch": "^3.3.2",
+    "zod": "^3.23.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["mcp", "google-stitch", "model-context-protocol"],
+  "license": "MIT"
+}

@@ -1,0 +1,29 @@
+# Flutter ignores
+market_scan_app/.dart_tool/
+market_scan_app/.flutter-plugins
+market_scan_app/.flutter-plugins-dependencies
+market_scan_app/.packages
+market_scan_app/build/
+market_scan_app/android/app/key.properties
+market_scan_app/ios/Flutter/Flutter.podspec
+
+# Node / Backend ignores
+**/node_modules/
+**/dist/
+**/.env
+**/logs/
+**/*.log
+
+# IDE & OS ignores
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# System/Local logs & caches
+.agents/
+.gemini/
