@@ -57,13 +57,19 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('server_ip');
     if (saved != null && saved.isNotEmpty) {
-      final normalized = _normalizeUrl(saved);
-      if (normalized != null) {
-        _serverUrl = normalized;
-      } else {
-        // Automatically discard corrupted setting and fallback to default
+      if (saved.contains('ngrok-free.dev')) {
+        // Automatically discard deprecated ngrok endpoints and migrate to Vercel default
         _serverUrl = _defaultBaseUrl;
         await prefs.remove('server_ip');
+      } else {
+        final normalized = _normalizeUrl(saved);
+        if (normalized != null) {
+          _serverUrl = normalized;
+        } else {
+          // Automatically discard corrupted setting and fallback to default
+          _serverUrl = _defaultBaseUrl;
+          await prefs.remove('server_ip');
+        }
       }
     }
     _authToken = prefs.getString('jwt_token');
