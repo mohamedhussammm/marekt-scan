@@ -38,7 +38,7 @@ router.post('/register', async (req, res) => {
       storeName: normalizedStoreName,
       role: assignedRole
     });
-    newUser.setPassword(password);
+    await newUser.setPasswordAsync(password);
     await newUser.save();
 
     // Generate JWT token on registration
@@ -82,13 +82,13 @@ router.post('/login', async (req, res) => {
       $or: [ { username: username.trim() }, { email: username.trim() } ]
     });
 
-    if (!user || !user.validPassword(password)) {
+    if (!user || !(await user.validPasswordAsync(password))) {
       return res.status(400).json({ success: false, error: 'اسم المستخدم أو البريد الإلكتروني أو كلمة المرور غير صحيحة' });
     }
 
-    // Dynamic Hashing Migration: upgrade iterations if below threshold (600,000)
-    if (!user.iterations || user.iterations < 600000) {
-      user.setPassword(password);
+    // Dynamic Hashing Migration: upgrade/normalize iterations to 100,000
+    if (!user.iterations || user.iterations !== 100000) {
+      await user.setPasswordAsync(password);
       await user.save();
     }
 

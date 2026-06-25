@@ -256,24 +256,6 @@ class _MainNavigationState extends State<MainNavigation> {
         },
         children: isCashier ? _cashierScreens : _adminScreens,
       ),
-      floatingActionButton: Selector<SyncEngine, int>(
-        selector: (_, s) => s.pendingCount,
-        builder: (context, count, child) {
-          if (count == 0) return const SizedBox.shrink();
-          final isSyncing = context.select<SyncEngine, bool>((s) => s.isSyncing);
-          return FloatingActionButton.extended(
-            onPressed: isSyncing ? null : () => _showSyncBottomSheet(context),
-            backgroundColor: Colors.amber[700],
-            icon: isSyncing
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Icon(Icons.sync_problem, color: Colors.white),
-            label: Text(
-              '$count في الانتظار',
-              style: const TextStyle(color: Colors.white, fontFamily: 'Cairo', fontWeight: FontWeight.bold),
-            ),
-          );
-        },
-      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (i) {

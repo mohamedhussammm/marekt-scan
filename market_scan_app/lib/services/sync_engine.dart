@@ -29,9 +29,9 @@ class SyncEngine extends ChangeNotifier {
   }
 
   void startMonitoring() {
-    // Poll every 30 seconds
+    // Poll every 10 seconds for rapid silent background updates
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) => flushQueue());
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) => flushQueue());
     
     // Also listen to connectivity changes
     _connectivity.onConnectivityChanged.listen((List<ConnectivityResult> results) {
@@ -47,10 +47,6 @@ class SyncEngine extends ChangeNotifier {
 
   Future<bool> isOnline() async {
     final connectivityResult = await _connectivity.checkConnectivity();
-    // Any connectivity other than 'none' means we have a network interface.
-    // The actual batch request will fail fast (within 8s timeout) if the
-    // server itself is unreachable, which is safer than probing Vercel URLs
-    // that may have cold starts.
     return !connectivityResult.contains(ConnectivityResult.none);
   }
 
@@ -59,6 +55,8 @@ class SyncEngine extends ChangeNotifier {
     await _db.insertOfflineOp(offlineId, operation, payload);
     _pendingCount = await _db.getPendingCount();
     notifyListeners();
+    // Attempt immediate background sync if online
+    flushQueue();
   }
 
   Future<List<OfflineQueueItem>> getPendingOps() => _db.getPendingOps();
