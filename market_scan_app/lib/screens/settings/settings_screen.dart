@@ -58,7 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                         width: 72,
                         height: 72,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.15),
+                          color: Colors.white.withValues(alpha: 0.15),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.store,
@@ -73,7 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                       const SizedBox(height: 4),
                       Text(isUserCashier ? 'اسم المستخدم: $username (كاشير)' : storeEmail,
                           style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
+                              color: Colors.white.withValues(alpha: 0.7),
                               fontSize: 13)),
                     ],
                   ),

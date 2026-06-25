@@ -6,7 +6,10 @@ const Shift = require('../models/Shift');
 // Create petty cash expense
 router.post('/', async (req, res) => {
   try {
-    const { amount, description } = req.body;
+    console.log('--- POST /api/expenses called ---');
+    console.log('Headers:', req.headers);
+    console.log('Body:', req.body);
+    const { amount, description, category } = req.body;
     if (!amount || !description) {
       return res.status(400).json({ success: false, error: 'المبلغ والوصف مطلوبان' });
     }
@@ -22,6 +25,7 @@ router.post('/', async (req, res) => {
       cashierUsername: req.username || 'unknown',
       shiftId: activeShift ? activeShift._id : null,
       amount: parseFloat(amount),
+      category: category || 'أخرى',
       description: description.trim()
     });
 
@@ -36,11 +40,16 @@ router.post('/', async (req, res) => {
 // Get current expenses
 router.get('/', async (req, res) => {
   try {
-    const { shiftId } = req.query;
+    const { shiftId, all, category } = req.query;
     let query = { storeName: req.storeName };
+    
+    if (category) {
+      query.category = category;
+    }
+
     if (shiftId) {
       query.shiftId = shiftId;
-    } else {
+    } else if (all !== 'true') {
       // Default to today's expenses
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
@@ -49,6 +58,19 @@ router.get('/', async (req, res) => {
 
     const expenses = await Expense.find(query).sort({ createdAt: -1 });
     res.json({ success: true, expenses });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get expenses aggregated by category
+router.get('/category-summary', async (req, res) => {
+  try {
+    const summary = await Expense.aggregate([
+      { $match: { storeName: req.storeName } },
+      { $group: { _id: '$category', total: { $sum: '$amount' } } }
+    ]);
+    res.json({ success: true, summary });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

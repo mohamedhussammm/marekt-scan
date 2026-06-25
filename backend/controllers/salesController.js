@@ -6,7 +6,22 @@ const Shift = require('../models/Shift');
 
 exports.createTransaction = async (req, res) => {
   try {
-    const { items, totalAmount, paymentMethod } = req.body;
+    const { items, totalAmount, paymentMethod, offline_id } = req.body;
+
+    // ── IDEMPOTENCY GUARD ────────────────────────────────────────────────
+    if (offline_id) {
+      const existing = await Transaction.findOne({ storeName: req.storeName, offline_id: offline_id });
+      if (existing) {
+        return res.status(200).json({
+          success: true,
+          transactionId: existing._id,
+          receiptNumber: existing.receiptNumber,
+          totalAmount: existing.totalAmount,
+          idempotent: true
+        });
+      }
+    }
+    // ── END IDEMPOTENCY GUARD ────────────────────────────────────────────
     
     // 0. Verify if there is an active open shift (for cashiers)
     const activeShift = await Shift.findOne({ storeName: req.storeName, status: 'open' });
@@ -42,6 +57,7 @@ exports.createTransaction = async (req, res) => {
     // 3. Create the transaction record scoped to this store and link shiftId
     const receiptNumber = "RCP-" + Date.now();
     const transaction = await Transaction.create({
+      offline_id: offline_id || undefined,
       receiptNumber,
       storeName: req.storeName,
       items,

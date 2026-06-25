@@ -5,7 +5,7 @@ import '../../core/constants/app_strings.dart';
 import '../../core/models/models.dart';
 import '../../core/providers/app_provider.dart';
 import '../../controllers/scanning_controller.dart';
-import '../../widgets/camera_view.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 class PosScannerScreen extends StatefulWidget {
   const PosScannerScreen({super.key});
@@ -14,24 +14,20 @@ class PosScannerScreen extends StatefulWidget {
   State<PosScannerScreen> createState() => _PosScannerScreenState();
 }
 
-class _PosScannerScreenState extends State<PosScannerScreen>
-    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+class _PosScannerScreenState extends State<PosScannerScreen> {
   final _amountCtrl = TextEditingController();
-  late TabController _tabController;
-
-  @override
-  bool get wantKeepAlive => true;
+  String _dialogCategory = 'أخرى';
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ScanningController>().addListener(_onScannerUpdate);
+      if (mounted) context.read<ScanningController>().addListener(_onScannerUpdate);
     });
   }
 
   void _onScannerUpdate() {
+    if (!mounted) return; // Bug #5: never touch context after dispose
     final scanner = context.read<ScanningController>();
     final provider = context.read<AppProvider>();
     
@@ -96,9 +92,14 @@ class _PosScannerScreenState extends State<PosScannerScreen>
 
   @override
   void dispose() {
+    // Bug #6: reset sheet guard flags so they don't stay locked
+    _isShowingAddSheet = false;
+    _isShowingRegisterSheet = false;
+    // Bug #3: always remove listener — prevents memory leak + dead-context crash
+    try {
+      context.read<ScanningController>().removeListener(_onScannerUpdate);
+    } catch (_) {}
     _amountCtrl.dispose();
-    _tabController.dispose();
-    // In a real app we'd removeListener, but this is a long-lived screen.
     super.dispose();
   }
 
@@ -209,7 +210,8 @@ class _PosScannerScreenState extends State<PosScannerScreen>
           );
         },
       ),
-    );
+    // Bug #6: reset flag on ANY dismiss path (back gesture, tap outside, etc.)
+    ).whenComplete(() => _isShowingAddSheet = false);
   }
 
   void _showRegisterProductDialog(BuildContext context, Product product) {
@@ -315,7 +317,8 @@ class _PosScannerScreenState extends State<PosScannerScreen>
           );
         },
       ),
-    );
+    // Bug #6: reset flag on ANY dismiss path (back gesture, tap outside, etc.)
+    ).whenComplete(() => _isShowingRegisterSheet = false);
   }
 
   void _showCheckoutDialog(BuildContext context, ScanningController scanner) {
@@ -405,8 +408,22 @@ class _PosScannerScreenState extends State<PosScannerScreen>
                               if (context.mounted) {
                                 context.read<AppProvider>().loadDashboardStats();
                               }
+                              final isOffline = result['isOffline'] == true;
                               ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('تمت العملية بنجاح!')));
+                                SnackBar(
+                                  content: Row(
+                                    children: [
+                                      Icon(isOffline ? Icons.cloud_off : Icons.check_circle, color: Colors.white),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        isOffline ? 'تم حفظ البيع محلياً ✓ — سيتم رفعه للسيرفر عند الاتصال' : 'تمت العملية بنجاح!',
+                                        style: const TextStyle(fontFamily: 'Cairo'),
+                                      ),
+                                    ],
+                                  ),
+                                  backgroundColor: isOffline ? Colors.orange : Colors.green,
+                                ),
+                              );
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(content: Text("خطأ: ${result['error']}")));
@@ -441,10 +458,13 @@ class _PosScannerScreenState extends State<PosScannerScreen>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-    final provider = context.watch<AppProvider>();
-    final isCashier = provider.userRole == 'cashier';
-    final activeShift = provider.activeShift;
+    // P0 fix: Use context.select for each field independently.
+    // context.watch<AppProvider>() was rebuilding this entire 1200+ line screen
+    // on EVERY notifyListeners() call — every 15s from the dashboard timer,
+    // and every cart mutation from ScanningController.
+    final isCashier = context.select<AppProvider, bool>((p) => p.userRole == 'cashier');
+    final activeShift = context.select<AppProvider, Shift?>((p) => p.activeShift);
+    final taxRate = context.select<AppProvider, double>((p) => p.taxRate);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -457,6 +477,26 @@ class _PosScannerScreenState extends State<PosScannerScreen>
             builder: (context, hasItems, _) {
               if (!hasItems) return const SizedBox.shrink();
               return TextButton.icon(
+                onPressed: () {
+                  context.read<ScanningController>().holdCurrentOrder();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('تم تعليق الطلب بنجاح', style: TextStyle(fontFamily: 'Cairo')),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.pause_circle_outline, color: Colors.white, size: 18),
+                label: const Text('تعليق الطلب',
+                    style: TextStyle(color: Colors.white, fontSize: 12, fontFamily: 'Cairo')),
+              );
+            },
+          ),
+          Selector<ScanningController, bool>(
+            selector: (_, s) => s.cartItems.isNotEmpty,
+            builder: (context, hasItems, _) {
+              if (!hasItems) return const SizedBox.shrink();
+              return TextButton.icon(
                 onPressed: () => context.read<ScanningController>().clearCart(),
                 icon: const Icon(Icons.delete_outline, color: Colors.white, size: 18),
                 label: const Text(AppStrings.clearCart,
@@ -464,6 +504,48 @@ class _PosScannerScreenState extends State<PosScannerScreen>
               );
             },
           ),
+          Selector<ScanningController, int>(
+            selector: (_, s) => s.heldOrders.length,
+            builder: (context, heldCount, _) {
+              if (heldCount == 0) return const SizedBox.shrink();
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.history_toggle_off_outlined, color: Colors.white),
+                    onPressed: () => _showHeldOrdersDialog(context),
+                    tooltip: 'الطلبات المعلقة',
+                  ),
+                  Positioned(
+                    right: 4,
+                    top: 4,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Text(
+                        '$heldCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+
           PopupMenuButton<String>(
             icon: const Icon(Icons.tune_outlined, color: Colors.white),
             onSelected: (val) {
@@ -514,134 +596,27 @@ class _PosScannerScreenState extends State<PosScannerScreen>
             },
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          tabs: const [
-            Tab(text: 'الكاميرا', icon: Icon(Icons.qr_code_scanner, size: 18)),
-            Tab(text: AppStrings.cart, icon: Icon(Icons.shopping_cart_outlined, size: 18)),
-          ],
-        ),
       ),
       body: Stack(
         children: [
-          TabBarView(
-            controller: _tabController,
+          Column(
             children: [
-              // ── Camera Scanner Tab ──────────────────────────────────────────────
-              Stack(
-                children: [
-                  const _CameraTabBody(),
-                  
-                  // Target box overlay
-                  const Center(
-                    child: _AnimatedScannerOverlay(),
-                  ),
-
-                  // Last scanned item popup - Only rebuilds if lastScannedProduct changes
-                  Selector<ScanningController, Product?>(
-                    selector: (_, s) => s.lastScannedProduct,
-                    builder: (context, lastProduct, _) {
-                      if (lastProduct == null) return const SizedBox.shrink();
-                      return Positioned(
-                        bottom: 24,
-                        left: 24,
-                        right: 24,
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.check_circle, color: AppColors.success, size: 32),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(lastProduct.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                    Text('${lastProduct.sellingPrice} ${AppStrings.currencySymbol}', style: const TextStyle(color: AppColors.primary)),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ],
+              // ── Scanner (top 42%) ─────────────────────────────────────────
+              SizedBox(
+                width: double.infinity,
+                height: MediaQuery.of(context).size.height * 0.42,
+                // RepaintBoundary: isolates camera paint so cart scroll
+                // updates don't force the camera preview to repaint.
+                child: RepaintBoundary(
+                  child: _ScannerSection(onCheckout: (sc) => _showCheckoutDialog(context, sc)),
+                ),
               ),
-
-              // ── Cart Tab ──────────────────────────────────────────────────
-              Selector<ScanningController, List<CartItem>>(
-                selector: (_, s) => s.cartItems,
-                builder: (context, cartItems, _) {
-                  final scanner = context.read<ScanningController>();
-                  return Column(
-                    children: [
-                      Expanded(
-                        child: cartItems.isEmpty
-                            ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.shopping_cart_outlined,
-                                  size: 64, color: AppColors.border),
-                              const SizedBox(height: 12),
-                              Text('السلة فارغة',
-                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppColors.border)),
-                            ],
-                          ),
-                        )
-                            : ListView.builder(
-                          padding: const EdgeInsets.all(12),
-                          itemCount: cartItems.length,
-                          itemBuilder: (_, i) {
-                            final item = cartItems[i];
-                            return _CartItemTile(
-                              item: item,
-                              onRemove: () => scanner.updateQuantity(item.product.barcode, 0),
-                              onQtyChange: (q) => scanner.updateQuantity(item.product.barcode, q),
-                            );
-                          },
-                        ),
-                      ),
-                      if (cartItems.isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
-                            boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))],
-                          ),
-                          child: Column(
-                            children: [
-                              _SummaryRow('المجموع الفرعي',
-                                  '${scanner.cartSubtotal.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
-                              _SummaryRow('ضريبة (${provider.taxRate.toStringAsFixed(0)}%)',
-                                  '${scanner.cartTax.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
-                              const Divider(),
-                              _SummaryRow('الإجمالي',
-                                  '${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
-                                  bold: true, color: AppColors.primary),
-                              const SizedBox(height: 12),
-                              ElevatedButton.icon(
-                                onPressed: () => _showCheckoutDialog(context, scanner),
-                                icon: const Icon(Icons.check_circle_outline),
-                                label: Text(
-                                    '${AppStrings.checkout} • ${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  );
-                },
+              // ── Cart panel (remaining space) ──────────────────────────────
+              Expanded(
+                child: _CartPanel(
+                  onCheckout: (sc) => _showCheckoutDialog(context, sc),
+                  taxRate: taxRate,
+                ),
               ),
             ],
           ),
@@ -650,7 +625,7 @@ class _PosScannerScreenState extends State<PosScannerScreen>
           if (isCashier && activeShift == null)
             Positioned.fill(
               child: Container(
-                color: Colors.black.withOpacity(0.88),
+                color: Colors.black.withValues(alpha: 0.88),
                 child: Center(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(32),
@@ -660,37 +635,19 @@ class _PosScannerScreenState extends State<PosScannerScreen>
                         Container(
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.08),
+                            color: Colors.red.withValues(alpha: 0.08),
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.redAccent.withOpacity(0.2), width: 2),
+                            border: Border.all(color: Colors.redAccent.withValues(alpha: 0.2), width: 2),
                           ),
-                          child: const Icon(
-                            Icons.door_sliding_outlined,
-                            size: 64,
-                            color: Colors.redAccent,
-                          ),
+                          child: const Icon(Icons.door_sliding_outlined, size: 64, color: Colors.redAccent),
                         ),
                         const SizedBox(height: 24),
-                        const Text(
-                          'الوردية مغلقة',
-                          style: TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
+                        const Text('الوردية مغلقة',
+                            style: TextStyle(fontFamily: 'Cairo', fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
                         const SizedBox(height: 12),
-                        const Text(
-                          'الرجاء فتح الوردية لبدء عمليات البيع ومسح المنتجات.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: 14,
-                            color: Colors.white70,
-                            height: 1.6,
-                          ),
-                        ),
+                        const Text('الرجاء فتح الوردية لبدء عمليات البيع ومسح المنتجات.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontFamily: 'Cairo', fontSize: 14, color: Colors.white70, height: 1.6)),
                         const SizedBox(height: 32),
                         ElevatedButton.icon(
                           onPressed: () => _showOpenRegisterDialog(context),
@@ -840,7 +797,17 @@ class _PosScannerScreenState extends State<PosScannerScreen>
   void _showRecordExpenseDialog(BuildContext context) {
     final amtCtrl = TextEditingController();
     final descCtrl = TextEditingController();
+    _dialogCategory = 'أخرى';
     bool isSubmitting = false;
+
+    final List<String> expenseCategories = [
+      'طاقة / كهرباء وغاز',
+      'رواتب',
+      'إيجار',
+      'بضاعة / مشتريات',
+      'صيانة',
+      'أخرى',
+    ];
     
     showDialog(
       context: context,
@@ -853,6 +820,24 @@ class _PosScannerScreenState extends State<PosScannerScreen>
               children: [
                 const Text('أدخل تفاصيل المصروف النقدي من الخزينة:', style: TextStyle(fontFamily: 'Cairo', fontSize: 13)),
                 const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: _dialogCategory,
+                  decoration: const InputDecoration(
+                    labelText: 'تصنيف المصروف',
+                  ),
+                  items: expenseCategories.map((c) => DropdownMenuItem(
+                    value: c,
+                    child: Text(c, style: const TextStyle(fontFamily: 'Cairo', fontSize: 13)),
+                  )).toList(),
+                  onChanged: (val) {
+                    if (val != null) {
+                      setDialogState(() {
+                        _dialogCategory = val;
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: amtCtrl,
                   keyboardType: TextInputType.number,
@@ -887,7 +872,11 @@ class _PosScannerScreenState extends State<PosScannerScreen>
                     return;
                   }
                   setDialogState(() => isSubmitting = true);
-                  final res = await context.read<AppProvider>().recordPettyExpense(amount, desc);
+                  final res = await context.read<AppProvider>().recordPettyExpense(
+                    amount, 
+                    desc, 
+                    category: _dialogCategory,
+                  );
                   if (ctx.mounted) {
                     Navigator.pop(ctx);
                   }
@@ -911,15 +900,457 @@ class _PosScannerScreenState extends State<PosScannerScreen>
       ),
     );
   }
+
+  void _showHeldOrdersDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'الطلبات المعلقة',
+                style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: MediaQuery.of(context).size.height * 0.4,
+            child: Selector<ScanningController, List<HeldOrder>>(
+              selector: (_, s) => s.heldOrders,
+              builder: (dialogCtx, heldOrders, _) {
+                if (heldOrders.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'لا توجد طلبات معلقة حالياً',
+                      style: TextStyle(fontFamily: 'Cairo', fontSize: 14, color: AppColors.textSecondary),
+                    ),
+                  );
+                }
+                return ListView.separated(
+                  itemCount: heldOrders.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (itemCtx, index) {
+                    final order = heldOrders[index];
+                    final dateStr = '${order.timestamp.hour.toString().padLeft(2, '0')}:${order.timestamp.minute.toString().padLeft(2, '0')}';
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        'طلب #${index + 1} - $dateStr',
+                        style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      subtitle: Text(
+                        '${order.itemCount} قطع - الإجمالي: ${order.total.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
+                        style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              minimumSize: Size.zero,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            onPressed: () async {
+                              final controller = context.read<ScanningController>();
+                              if (controller.cartItems.isNotEmpty) {
+                                final merge = await showDialog<bool>(
+                                  context: context,
+                                  builder: (confirmCtx) => AlertDialog(
+                                    title: const Text('تنبيه', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)),
+                                    content: const Text(
+                                      'سلة المشتريات الحالية ليست فارغة. هل تريد دمج الطلب المعلق مع السلة الحالية أم استبدالها؟',
+                                      style: TextStyle(fontFamily: 'Cairo', fontSize: 13),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(confirmCtx, null),
+                                        child: const Text('إلغاء', style: TextStyle(fontFamily: 'Cairo')),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(confirmCtx, false),
+                                        child: const Text('استبدال', style: TextStyle(fontFamily: 'Cairo', color: Colors.red)),
+                                      ),
+                                      ElevatedButton(
+                                        onPressed: () => Navigator.pop(confirmCtx, true),
+                                        child: const Text('دمج', style: TextStyle(fontFamily: 'Cairo')),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (merge == null) return;
+                                controller.restoreHeldOrder(order.id, merge: merge);
+                              } else {
+                                controller.restoreHeldOrder(order.id, merge: false);
+                              }
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                            child: const Text('استرجاع', style: TextStyle(fontFamily: 'Cairo', fontSize: 12)),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                            onPressed: () {
+                              context.read<ScanningController>().deleteHeldOrder(order.id);
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
-class _CameraTabBody extends StatelessWidget {
-  const _CameraTabBody();
+
+class _ScannerSection extends StatefulWidget {
+  final Function(ScanningController) onCheckout;
+  const _ScannerSection({required this.onCheckout});
+
+  @override
+  State<_ScannerSection> createState() => _ScannerSectionState();
+}
+
+class _ScannerSectionState extends State<_ScannerSection> {
+  // Bug #2: declare late so it is initialized in initState(), not at field-
+  // construction time. This guarantees a clean native camera session every time
+  // the widget enters the tree, and stop()+dispose() on every exit.
+  late MobileScannerController _scannerController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scannerController = MobileScannerController(
+      detectionSpeed: DetectionSpeed.normal,
+      detectionTimeoutMs: 1000,
+      returnImage: false,
+      formats: [
+        BarcodeFormat.ean13,
+        BarcodeFormat.ean8,
+        BarcodeFormat.code128,
+        BarcodeFormat.code39,
+        BarcodeFormat.qrCode,
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    // Bug #2: stop() first — releases the native camera session cleanly
+    // before the Dart controller object is garbage collected.
+    _scannerController.stop();
+    _scannerController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return CameraView(
-      onImage: (img) => context.read<ScanningController>().processImage(img),
+    final scanner = context.read<ScanningController>();
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+
+        Positioned.fill(
+          child: MobileScanner(
+            controller: _scannerController,
+            onDetect: (capture) {
+              final barcode = capture.barcodes.firstOrNull;
+              final raw = barcode?.rawValue;
+              if (raw != null && raw.isNotEmpty) {
+                scanner.processBarcode(raw);
+              }
+            },
+          ),
+        ),
+        // Corner bracket target box
+        const Center(
+          child: _StaticScannerOverlay(),
+        ),
+        // Top controls: Clear (left)
+        Positioned(
+          top: 12,
+          left: 12,
+          child: Selector<ScanningController, bool>(
+            selector: (_, s) => s.cartItems.isNotEmpty,
+            builder: (context, hasItems, _) {
+              if (!hasItems) return const SizedBox.shrink();
+              return ElevatedButton.icon(
+                onPressed: () => context.read<ScanningController>().clearCart(),
+                icon: const Icon(Icons.delete_outline, size: 16),
+                label: const Text(
+                  'مسح السلة',
+                  style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+              );
+            },
+          ),
+        ),
+        // Bug #7: torch driven by controller's ValueListenable — syncs with
+        // real hardware state after backgrounding, incoming calls, OS resets.
+        Positioned(
+          bottom: 12,
+          right: 12,
+          child: ValueListenableBuilder(
+            valueListenable: _scannerController,
+            builder: (context, state, _) {
+              final torchOn = state.torchState == TorchState.on;
+              return CircleAvatar(
+                backgroundColor: Colors.black54,
+                child: IconButton(
+                  icon: Icon(
+                    torchOn ? Icons.flash_on : Icons.flash_off,
+                    color: Colors.white,
+                  ),
+                  onPressed: () => _scannerController.toggleTorch(),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StaticScannerOverlay extends StatelessWidget {
+  const _StaticScannerOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 240,
+      height: 140,
+      child: Stack(
+        children: [
+          // Top-left corner
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: const BoxDecoration(
+                border: Border(
+                  left: BorderSide(color: Colors.white, width: 3),
+                  top: BorderSide(color: Colors.white, width: 3),
+                ),
+              ),
+            ),
+          ),
+          // Top-right corner
+          Positioned(
+            right: 0,
+            top: 0,
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: const BoxDecoration(
+                border: Border(
+                  right: BorderSide(color: Colors.white, width: 3),
+                  top: BorderSide(color: Colors.white, width: 3),
+                ),
+              ),
+            ),
+          ),
+          // Bottom-left corner
+          Positioned(
+            left: 0,
+            bottom: 0,
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: const BoxDecoration(
+                border: Border(
+                  left: BorderSide(color: Colors.white, width: 3),
+                  bottom: BorderSide(color: Colors.white, width: 3),
+                ),
+              ),
+            ),
+          ),
+          // Bottom-right corner
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: const BoxDecoration(
+                border: Border(
+                  right: BorderSide(color: Colors.white, width: 3),
+                  bottom: BorderSide(color: Colors.white, width: 3),
+                ),
+              ),
+            ),
+          ),
+          // Central scan target circle matching Open Food Facts
+          Center(
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1.5),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Icon(
+                  Icons.qr_code_scanner_outlined,
+                  color: Colors.white.withValues(alpha: 0.6),
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CartPanel extends StatelessWidget {
+  final Function(ScanningController) onCheckout;
+  final double taxRate;
+  const _CartPanel({required this.onCheckout, required this.taxRate});
+
+  @override
+  Widget build(BuildContext context) {
+    return Selector<ScanningController, List<CartItem>>(
+      selector: (_, s) => s.cartItems,
+      builder: (context, cartItems, _) {
+        final scanner = context.read<ScanningController>();
+        return Column(
+          children: [
+            Expanded(
+              child: cartItems.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceVariant,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.shopping_cart_outlined,
+                              size: 40,
+                              color: AppColors.textHint,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'السلة فارغة حالياً',
+                            style: TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'ابدأ بمسح باركود المنتجات لإضافتها تلقائياً',
+                            style: TextStyle(
+                              fontFamily: 'Cairo',
+                              fontSize: 11,
+                              color: AppColors.textHint,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(12),
+                      itemCount: cartItems.length,
+                      itemBuilder: (_, i) {
+                        final item = cartItems[i];
+                        return _CartItemTile(
+                          item: item,
+                          onRemove: () => scanner.updateQuantity(item.product.barcode, 0),
+                          onQtyChange: (q) => scanner.updateQuantity(item.product.barcode, q),
+                        );
+                      },
+                    ),
+            ),
+            if (cartItems.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, -4),
+                    ),
+                  ],
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _SummaryRow('المجموع الفرعي',
+                        '${scanner.cartSubtotal.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
+                    _SummaryRow('ضريبة (${taxRate.toStringAsFixed(0)}%)',
+                        '${scanner.cartTax.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 4),
+                      child: Divider(height: 1),
+                    ),
+                    _SummaryRow(
+                      'الإجمالي',
+                      '${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
+                      bold: true,
+                      color: AppColors.primary,
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => onCheckout(scanner),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: const Icon(Icons.check_circle_outline, size: 20),
+                        label: Text(
+                          '${AppStrings.checkout} • ${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
+                          style: const TextStyle(
+                            fontFamily: 'Cairo',
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1003,73 +1434,6 @@ class _QtyBtn extends StatelessWidget {
           border: Border.all(color: AppColors.border),
         ),
         child: Icon(icon, size: 16, color: AppColors.primary),
-      ),
-    );
-  }
-}
-
-class _AnimatedScannerOverlay extends StatefulWidget {
-  const _AnimatedScannerOverlay();
-
-  @override
-  State<_AnimatedScannerOverlay> createState() => _AnimatedScannerOverlayState();
-}
-
-class _AnimatedScannerOverlayState extends State<_AnimatedScannerOverlay> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 250,
-      height: 250,
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.primary, width: 2),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: AnimatedBuilder(
-        animation: _animation,
-        builder: (context, child) {
-          return Stack(
-            children: [
-              Positioned(
-                top: _animation.value * 248, // 250 - 2 (line height)
-                left: 0,
-                right: 0,
-                child: Container(
-                  height: 2,
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.red.withOpacity(0.5),
-                        blurRadius: 4,
-                        spreadRadius: 2,
-                      )
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
       ),
     );
   }

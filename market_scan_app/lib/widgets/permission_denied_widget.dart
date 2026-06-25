@@ -18,10 +18,10 @@ class PermissionDeniedWidget extends StatelessWidget {
               width: 120,
               height: 120,
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.08),
+                color: Colors.red.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: Colors.redAccent.withOpacity(0.2),
+                  color: Colors.redAccent.withValues(alpha: 0.2),
                   width: 2,
                 ),
               ),
@@ -65,9 +65,9 @@ class PermissionDeniedWidget extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.08),
+                color: Colors.orange.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.orange.withOpacity(0.3), width: 1),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3), width: 1),
               ),
               child: const Row(
                 mainAxisSize: MainAxisSize.min,

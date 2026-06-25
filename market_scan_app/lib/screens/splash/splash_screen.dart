@@ -55,7 +55,7 @@ class _SplashScreenState extends State<SplashScreen>
                     width: 120,
                     height: 120,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
+                      color: Colors.white.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -79,7 +79,7 @@ class _SplashScreenState extends State<SplashScreen>
                     AppStrings.appSubtitle,
                     style: TextStyle(
                       fontSize: 16,
-                      color: Colors.white.withOpacity(0.8),
+                      color: Colors.white.withValues(alpha: 0.8),
                       fontWeight: FontWeight.w400,
                     ),
                   ),
@@ -88,7 +88,7 @@ class _SplashScreenState extends State<SplashScreen>
                     width: 40,
                     height: 40,
                     child: CircularProgressIndicator(
-                      color: Colors.white.withOpacity(0.6),
+                      color: Colors.white.withValues(alpha: 0.6),
                       strokeWidth: 2.5,
                     ),
                   ),

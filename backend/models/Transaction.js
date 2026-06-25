@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const transactionSchema = new mongoose.Schema({
+  offline_id: { type: String, unique: true, sparse: true },
   receiptNumber: { type: String, required: true },
   storeName: { type: String, required: true, index: true },
   items: [{

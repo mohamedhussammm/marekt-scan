@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
@@ -19,16 +20,52 @@ class _DashboardScreenState extends State<DashboardScreen>
     with AutomaticKeepAliveClientMixin {
   static final _currencyFmt = NumberFormat('#,##0.00', 'ar');
   Timer? _refreshTimer;
+  bool _isRefreshing = false;
+  int _offlineSkipCount = 0; // number of remaining ticks to skip after a SocketException
 
   @override
   void initState() {
     super.initState();
-    // Auto refresh dashboard statistics and transactions list every 15 seconds for real-time tracking
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
-      if (mounted) {
-        context.read<AppProvider>().loadDashboardStats();
-      }
+    // Load dashboard stats immediately on startup
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadData();
     });
+
+    // Set up periodic 15-second background updates
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      if (!mounted) return;
+
+      // Back off silently when we know the device is offline
+      if (_offlineSkipCount > 0) {
+        _offlineSkipCount--;
+        return;
+      }
+
+      // Prevent concurrent refreshes
+      if (_isRefreshing) return;
+      _loadData();
+    });
+  }
+
+  Future<void> _loadData() async {
+    if (!mounted) return;
+    setState(() => _isRefreshing = true);
+
+    try {
+      await context.read<AppProvider>().loadDashboardStats(rethrowNetworkErrors: true);
+      _offlineSkipCount = 0; // reset backoff on success
+    } catch (e) {
+      final errStr = e.toString();
+      final isNetworkError = e is SocketException || errStr.contains('SocketException') || errStr.contains('Connection failed') || errStr.contains('Network is unreachable');
+      if (isNetworkError) {
+        // Device has no network — back off for 4 ticks (~60 s) and stay quiet
+        _offlineSkipCount = 4;
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
+    }
   }
 
   @override
@@ -43,8 +80,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    // P0 fix: context.read for provider actions (no subscription needed).
+    // context.select for isCashier — only rebuilds when role changes,
+    // not on every 15-second dashboard poll notifyListeners().
     final provider = context.read<AppProvider>();
-    final isCashier = context.watch<AppProvider>().userRole == 'cashier';
+    final isCashier = context.select<AppProvider, bool>((p) => p.userRole == 'cashier');
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -70,7 +110,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     children: [
                       Text(
                         'مرحباً بك 👋',
-                        style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13),
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13),
                       ),
                       const SizedBox(height: 2),
                       Selector<AppProvider, String>(
@@ -147,7 +187,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                   ),
                   Selector<AppProvider, int>(
-                    selector: (_, p) => p.products.length,
+                    selector: (_, p) => p.totalProductsCount,
                     builder: (context, productsCount, __) => _StatCard(
                       title: AppStrings.totalProducts,
                       value: '$productsCount',
@@ -158,7 +198,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                   ),
                   Selector<AppProvider, int>(
-                    selector: (_, p) => p.lowStockProducts.length,
+                    selector: (_, p) => p.lowStockCount,
                     builder: (context, lowStockCount, __) => _StatCard(
                       title: AppStrings.lowStockAlerts,
                       value: '$lowStockCount',
@@ -241,9 +281,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                                   ],
                                 ),
                                 const SizedBox(height: 20),
+                                // P4: RepaintBoundary isolates chart paint
+                                // region — scroll/rebuild above/below won't
+                                // force the heavy BarChart to repaint.
                                 SizedBox(
                                   height: 160,
-                                  child: _WeeklyChart(data: weeklySales),
+                                  child: RepaintBoundary(
+                                    child: _WeeklyChart(data: weeklySales),
+                                  ),
                                 ),
                               ],
                             ),
@@ -266,7 +311,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                   style: Theme.of(context).textTheme.titleLarge),
                               if (!isCashier)
                                 TextButton(
-                                  onPressed: () => Navigator.pushNamed(context, '/reports'),
+                                  onPressed: () => Navigator.pushNamed(context, '/transactions-history'),
                                   child: const Text(AppStrings.viewAll,
                                       style: TextStyle(color: AppColors.primary)),
                                 ),
@@ -282,7 +327,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                               ),
                             )
                           else
-                            ...sales.take(5).map((sale) => _TransactionTile(sale: sale)),
+                            // P2 fix: ListView.builder lazily constructs only
+                            // visible tiles vs spread which eagerly builds all.
+                            ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: sales.take(5).length,
+                              addAutomaticKeepAlives: false,
+                              addRepaintBoundaries: false,
+                              itemBuilder: (context, i) =>
+                                  _TransactionTile(sale: sales[i]),
+                            ),
                         ],
                       ),
                     ),
@@ -331,7 +386,7 @@ class _StatCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(icon, color: color, size: 22),
@@ -375,9 +430,9 @@ class _QuickAction extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.08),
+            color: color.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: color.withOpacity(0.2)),
+            border: Border.all(color: color.withValues(alpha: 0.2)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -415,7 +470,7 @@ class _WeeklyChart extends StatelessWidget {
             barRods: [
               BarChartRodData(
                 toY: data[i],
-                color: i == data.length - 1 ? AppColors.primary : AppColors.primaryLight.withOpacity(0.4),
+                color: i == data.length - 1 ? AppColors.primary : AppColors.primaryLight.withValues(alpha: 0.4),
                 width: 20,
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
               ),
@@ -447,9 +502,13 @@ class _TransactionTile extends StatelessWidget {
   final dynamic sale;
   const _TransactionTile({required this.sale});
 
+  // P4 fix: DateFormat is expensive to construct (locale parsing).
+  // Caching as static: created once for the whole app lifetime
+  // instead of once per build() call per tile (was 5 instances per render).
+  static final _timeFmt = DateFormat('hh:mm a', 'ar');
+
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('hh:mm a', 'ar');
     final isExpense = sale.type == 'expense';
 
     return Card(
@@ -459,7 +518,7 @@ class _TransactionTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         side: const BorderSide(color: AppColors.border),
       ),
-      color: isExpense ? Colors.red.withOpacity(0.02) : Colors.white,
+      color: isExpense ? Colors.red.withValues(alpha: 0.02) : Colors.white,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: isExpense
@@ -469,7 +528,7 @@ class _TransactionTile extends StatelessWidget {
                   builder: (ctx) => AlertDialog(
                     title: const Text('تفاصيل المصروف النقدي', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)),
                     content: Text(
-                      'الوصف: ${sale.items.first.name}\nالمبلغ: ${sale.total.toStringAsFixed(2)} ${AppStrings.currencySymbol}\nالوقت: ${DateFormat('yyyy-MM-dd hh:mm a').format(sale.createdAt)}',
+                      'الوصف: ${sale.items.isNotEmpty ? sale.items.first.product.name : "-"}\nالمبلغ: ${sale.total.toStringAsFixed(2)} ${AppStrings.currencySymbol}\nالوقت: ${DateFormat('yyyy-MM-dd hh:mm a').format(sale.createdAt)}',
                       style: const TextStyle(fontFamily: 'Cairo', height: 1.6),
                     ),
                     actions: [
@@ -490,7 +549,7 @@ class _TransactionTile extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: isExpense ? Colors.red.withOpacity(0.08) : AppColors.primaryContainer,
+                  color: isExpense ? Colors.red.withValues(alpha: 0.08) : AppColors.primaryContainer,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
@@ -510,12 +569,12 @@ class _TransactionTile extends StatelessWidget {
                     ),
                     Text(
                       isExpense
-                          ? 'مصروفات: ${sale.items.first.name}'
+                          ? 'مصروفات: ${sale.items.isNotEmpty ? sale.items.first.product.name : "-"}'
                           : '${sale.items.length} منتجات • ${sale.paymentMethod}${sale.cashierName != null && sale.cashierName!.isNotEmpty ? " • بواسطة: ${sale.cashierName}" : ""}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: isExpense ? Colors.redAccent.withOpacity(0.8) : AppColors.textSecondary,
+                        color: isExpense ? Colors.redAccent.withValues(alpha: 0.8) : AppColors.textSecondary,
                         fontSize: 12,
                         fontWeight: isExpense ? FontWeight.w600 : FontWeight.normal,
                       ),
@@ -535,7 +594,7 @@ class _TransactionTile extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    fmt.format(sale.createdAt),
+                    _timeFmt.format(sale.createdAt),
                     style: const TextStyle(color: AppColors.textHint, fontSize: 11),
                   ),
                 ],

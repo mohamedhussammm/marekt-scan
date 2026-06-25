@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../core/models/models.dart';
@@ -20,7 +21,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -34,6 +35,21 @@ class DatabaseHelper {
           } catch (_) {}
           try {
             await db.execute('ALTER TABLE products ADD COLUMN imageUrl TEXT');
+          } catch (_) {}
+        }
+        if (oldVersion < 4) {
+          try {
+            await db.execute('''
+CREATE TABLE offline_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  offline_id TEXT NOT NULL UNIQUE,
+  operation TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  retries INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'pending'
+)
+''');
           } catch (_) {}
         }
       },
@@ -65,6 +81,18 @@ CREATE TABLE products (
   unit TEXT DEFAULT 'قطعة',
   imageUrl TEXT
   )
+''');
+
+    await db.execute('''
+CREATE TABLE offline_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  offline_id TEXT NOT NULL UNIQUE,
+  operation TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  retries INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'pending'
+)
 ''');
   }
 
@@ -124,7 +152,11 @@ CREATE TABLE products (
       batch.insert(
         'products',
         p.toJson(),
-        conflictAlgorithm: ConflictAlgorithm.replace,
+        // Bug #8 fix: use ignore instead of replace.
+        // replace = DELETE + INSERT for every row = 3200 disk writes on every login.
+        // ignore = skip rows that already exist = near-zero I/O for unchanged data.
+        // Individual insertProduct() calls still use replace for targeted updates.
+        conflictAlgorithm: ConflictAlgorithm.ignore,
       );
     }
     await batch.commit(noResult: true);
@@ -133,6 +165,92 @@ CREATE TABLE products (
   Future<void> clearAllProducts() async {
     final db = await instance.database;
     await db.delete('products');
+  }
+
+  // ─── OFFLINE QUEUE METHODS ───────────────────────────────────────────────
+
+  Future<void> insertOfflineOp(String offlineId, String operation, Map<String, dynamic> payload) async {
+    final db = await instance.database;
+    await db.insert('offline_queue', {
+      'offline_id': offlineId,
+      'operation': operation,
+      'payload': jsonEncode(payload),
+      'created_at': DateTime.now().toIso8601String(),
+      'retries': 0,
+      'status': 'pending',
+    });
+  }
+
+  Future<List<OfflineQueueItem>> getPendingOps() async {
+    final db = await instance.database;
+    final maps = await db.query('offline_queue', where: 'status = ?', whereArgs: ['pending'], orderBy: 'id ASC');
+    return maps.map((e) => OfflineQueueItem(
+      id: e['id'] as int,
+      offlineId: e['offline_id'] as String,
+      operation: e['operation'] as String,
+      payload: jsonDecode(e['payload'] as String),
+      createdAt: DateTime.parse(e['created_at'] as String),
+      retries: e['retries'] as int,
+      status: e['status'] as String,
+    )).toList();
+  }
+
+  Future<List<PettyExpense>> getOfflineExpenses() async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'offline_queue',
+      where: 'operation = ? AND status = ?',
+      whereArgs: ['add_expense', 'pending'],
+      orderBy: 'id ASC',
+    );
+    final List<PettyExpense> list = [];
+    for (final map in maps) {
+      try {
+        final payload = jsonDecode(map['payload'] as String);
+        list.add(PettyExpense(
+          id: payload['offline_id'] ?? map['offline_id'] ?? '',
+          storeName: '',
+          cashierUsername: '',
+          amount: (payload['amount'] ?? 0.0).toDouble(),
+          category: payload['category'] ?? 'أخرى',
+          description: payload['description'] ?? '',
+          timestamp: DateTime.parse(map['created_at'] as String),
+          isOffline: true,
+        ));
+      } catch (_) {}
+    }
+    return list;
+  }
+
+  Future<void> deleteOfflineOp(int id) async {
+    final db = await instance.database;
+    await db.delete('offline_queue', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> markOpFailed(int id, int currentRetries) async {
+    final db = await instance.database;
+    final nextRetries = currentRetries + 1;
+    final status = nextRetries >= 5 ? 'failed' : 'pending';
+    await db.update('offline_queue', {'retries': nextRetries, 'status': status}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> getPendingCount() async {
+    final db = await instance.database;
+    final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM offline_queue WHERE status = ?', ['pending']));
+    return count ?? 0;
+  }
+
+  Future<int> getProductCount() async {
+    final db = await instance.database;
+    final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM products'));
+    return count ?? 0;
+  }
+
+  Future<int> getLowStockCount() async {
+    final db = await instance.database;
+    final count = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM products WHERE currentStock <= minThreshold'));
+    return count ?? 0;
   }
 
   Future close() async {

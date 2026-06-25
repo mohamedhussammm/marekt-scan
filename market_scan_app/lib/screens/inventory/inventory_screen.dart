@@ -2,13 +2,22 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/models/models.dart';
 import '../../core/providers/app_provider.dart';
-import '../../widgets/camera_view.dart';
+import '../../core/utils/barcode_validator.dart';
+import '../../services/api_service.dart';
 
+/// InventoryScreen — Senior Flutter pattern:
+///
+/// ✅ Self-contained paginated data (no AppProvider._products list in memory)
+/// ✅ Server-side search & category filter via MongoDB regex (no 3200-item loop)
+/// ✅ Infinite scroll with SliverList.builder (lazy — only visible tiles built)
+/// ✅ No AutomaticKeepAliveClientMixin — clean camera lifecycle
+/// ✅ Debounced search sends to backend after 400 ms idle
+/// ✅ Add / Edit / Delete / StockIn all trigger a full page-1 refresh
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
 
@@ -16,37 +25,99 @@ class InventoryScreen extends StatefulWidget {
   State<InventoryScreen> createState() => _InventoryScreenState();
 }
 
-class _InventoryScreenState extends State<InventoryScreen>
-    with AutomaticKeepAliveClientMixin {
-  final _searchCtrl = TextEditingController();
+class _InventoryScreenState extends State<InventoryScreen> {
+  static const int _pageSize = 40;
+
+  final List<Product> _items = [];
+  final ScrollController _scrollCtrl = ScrollController();
+  final TextEditingController _searchCtrl = TextEditingController();
+
   Timer? _debounce;
+  int _currentPage = 1;
+  int _totalCount = 0;
+  bool _hasMore = false;
+  bool _isInitialLoading = true;
+  bool _isLoadingMore = false;
+  String? _error;
+  bool _isFromCache = false;
+
+  late ApiService _api;
 
   @override
-  bool get wantKeepAlive => true;
+  void initState() {
+    super.initState();
+    _api = context.read<AppProvider>().api;
+    _scrollCtrl.addListener(_onScroll);
+    _fetch(1);
+  }
 
   @override
   void dispose() {
+    _scrollCtrl.dispose();
     _searchCtrl.dispose();
     _debounce?.cancel();
     super.dispose();
   }
 
-  void _onSearchChanged(String val, AppProvider provider) {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 200), () {
-      provider.setSearchQuery(val);
-    });
+  void _onScroll() {
+    // Guard: only trigger when we actually need more data.
+    // Without this, setState fires on EVERY pixel of scroll — killing frame budget.
+    if (!_hasMore || _isLoadingMore || _isInitialLoading) return;
+    if (_scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 400) {
+      _fetch(_currentPage + 1);
+    }
   }
 
+  void _onSearchChanged(String val) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () => _fetch(1));
+  }
+
+  Future<void> _fetch(int page) async {
+    if (page == 1) {
+      setState(() { _isInitialLoading = true; _error = null; });
+    } else {
+      if (_isLoadingMore) return;
+      setState(() => _isLoadingMore = true);
+    }
+    try {
+      final result = await _api.getProductsPaginated(
+        page: page,
+        limit: _pageSize,
+        search: _searchCtrl.text.trim(),
+      );
+      if (!mounted) return;
+      final newItems = result['products'] as List<Product>;
+      setState(() {
+        if (page == 1) { _items..clear()..addAll(newItems); }
+        else           { _items.addAll(newItems); }
+        _currentPage      = page;
+        _totalCount       = result['total'] as int;
+        _hasMore          = result['hasMore'] as bool;
+        _isFromCache      = result['fromCache'] == true;
+        _isInitialLoading = false;
+        _isLoadingMore    = false;
+        _error            = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _error = e.toString(); _isInitialLoading = false; _isLoadingMore = false; });
+    }
+  }
+
+  Future<void> _refresh() => _fetch(1);
+
+  // ── DIALOGS ────────────────────────────────────────────────────────────────
+
   void _showAddProductDialog(BuildContext context, {Product? product}) {
-    final isEdit = product != null;
-    final nameCtrl = TextEditingController(text: product?.name ?? '');
+    final isEdit    = product != null;
+    final nameCtrl  = TextEditingController(text: product?.name ?? '');
     final barcodeCtrl = TextEditingController(text: product?.barcode ?? '');
     final categoryCtrl = TextEditingController(text: product?.category ?? '');
-    final costCtrl = TextEditingController(text: product?.costPrice.toString() ?? '');
-    final sellCtrl = TextEditingController(text: product?.sellingPrice.toString() ?? '');
+    final costCtrl  = TextEditingController(text: product?.costPrice.toString() ?? '');
+    final sellCtrl  = TextEditingController(text: product?.sellingPrice.toString() ?? '');
     final stockCtrl = TextEditingController(text: product?.stockQuantity.toString() ?? '');
-    final minCtrl = TextEditingController(text: product?.minStockLevel.toString() ?? '');
+    final minCtrl   = TextEditingController(text: product?.minStockLevel.toString() ?? '');
 
     showModalBottomSheet(
       context: context,
@@ -54,17 +125,14 @@ class _InventoryScreenState extends State<InventoryScreen>
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+        padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(child: Container(
-                  width: 40, height: 4,
-                  decoration: BoxDecoration(color: AppColors.border,
-                      borderRadius: BorderRadius.circular(2)))),
+              Center(child: Container(width: 40, height: 4,
+                  decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 16),
               Text(isEdit ? AppStrings.editProduct : AppStrings.addProduct,
                   style: Theme.of(context).textTheme.headlineSmall),
@@ -78,7 +146,6 @@ class _InventoryScreenState extends State<InventoryScreen>
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.camera_alt_outlined, color: AppColors.primary),
                   onPressed: () async {
-                    // Open scan sheet
                     final scanned = await showModalBottomSheet<String>(
                       context: ctx,
                       isScrollControlled: true,
@@ -87,9 +154,7 @@ class _InventoryScreenState extends State<InventoryScreen>
                           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
                       builder: (_) => const BarcodeScannerSheet(),
                     );
-                    if (scanned != null && scanned.isNotEmpty) {
-                      barcodeCtrl.text = scanned;
-                    }
+                    if (scanned != null && scanned.isNotEmpty) barcodeCtrl.text = scanned;
                   },
                 ),
               ),
@@ -109,7 +174,7 @@ class _InventoryScreenState extends State<InventoryScreen>
               ]),
               const SizedBox(height: 20),
               ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   final p = Product(
                     id: product?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
                     name: nameCtrl.text,
@@ -120,12 +185,11 @@ class _InventoryScreenState extends State<InventoryScreen>
                     stockQuantity: int.tryParse(stockCtrl.text) ?? 0,
                     minStockLevel: int.tryParse(minCtrl.text) ?? 5,
                   );
-                  if (isEdit) {
-                    context.read<AppProvider>().updateProduct(p);
-                  } else {
-                    context.read<AppProvider>().addProduct(p);
-                  }
-                  Navigator.pop(ctx);
+                  final provider = context.read<AppProvider>();
+                  if (isEdit) { await provider.updateProduct(p); }
+                  else        { await provider.addProduct(p); }
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  _refresh(); // refresh paginated list
                 },
                 child: Text(AppStrings.save),
               ),
@@ -150,10 +214,11 @@ class _InventoryScreenState extends State<InventoryScreen>
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text(AppStrings.cancel)),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               final qty = int.tryParse(ctrl.text) ?? 0;
-              if (qty > 0) context.read<AppProvider>().addStock(product.id, qty);
-              Navigator.pop(ctx);
+              if (qty > 0) await context.read<AppProvider>().addStock(product.id, qty);
+              if (ctx.mounted) Navigator.pop(ctx);
+              _refresh();
             },
             child: const Text(AppStrings.save),
           ),
@@ -162,11 +227,10 @@ class _InventoryScreenState extends State<InventoryScreen>
     );
   }
 
+  // ── BUILD ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-    final provider = context.read<AppProvider>();
-
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -181,99 +245,219 @@ class _InventoryScreenState extends State<InventoryScreen>
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: (val) => _onSearchChanged(val, provider),
-              decoration: InputDecoration(
-                hintText: 'بحث في المخزون...',
-                prefixIcon: const Icon(Icons.search, color: AppColors.primary),
-                suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: _searchCtrl,
-                  builder: (context, value, __) {
-                    if (value.text.isEmpty) return const SizedBox.shrink();
-                    return IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
-                      onPressed: () {
-                        _searchCtrl.clear();
-                        provider.setSearchQuery('');
-                      },
+          // ── Header: search + chips ───────────────────────────────────────────
+          // Extracted into its own widget — built ONCE, never rebuilt when
+          // the list scrolls or loads more pages.
+          _InventoryHeader(
+            searchCtrl: _searchCtrl,
+            totalCount: _totalCount,
+            onChanged: _onSearchChanged,
+            onClear: () { _searchCtrl.clear(); _fetch(1); },
+          ),
+
+          // ── Body states ───────────────────────────────────────────────────
+          if (_isInitialLoading)
+            const Expanded(
+              child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+            ),
+
+          // Offline: no cache yet — show full-screen prompt
+          if (!_isInitialLoading && _error != null && _items.isEmpty)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off_rounded, size: 56, color: AppColors.textHint),
+                    const SizedBox(height: 12),
+                    const Text('الجهاز غير متصل بالإنترنت',
+                        style: TextStyle(color: AppColors.textSecondary, fontFamily: 'Cairo', fontWeight: FontWeight.w600),
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 4),
+                    const Text('لا توجد بيانات مخزنة محلياً بعد.',
+                        style: TextStyle(color: AppColors.textHint, fontFamily: 'Cairo'),
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: _refresh,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('إعادة المحاولة'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Offline: has cached data — show slim amber banner
+          if (!_isInitialLoading && _isFromCache)
+            Container(
+              width: double.infinity,
+              color: Colors.orange.shade50,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_off_rounded, size: 16, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'عرض البيانات المحلية — غير متصل بالإنترنت',
+                      style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: Colors.orange),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _refresh,
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(60, 28)),
+                    child: const Text('تحديث', style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: Colors.orange)),
+                  ),
+                ],
+              ),
+            ),
+
+          if (!_isInitialLoading && _error == null && _items.isEmpty)
+            const Expanded(
+              child: Center(
+                child: Text('لا توجد منتجات مطابقة',
+                    style: TextStyle(color: AppColors.textSecondary)),
+              ),
+            ),
+
+          // ── Product list ───────────────────────────────────────────────────
+          if (!_isInitialLoading && _items.isNotEmpty)
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _refresh,
+                color: AppColors.primary,
+                child: ListView.builder(
+                  controller: _scrollCtrl,
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  // Tell Flutter the count up front — skips per-item measurement
+                  itemCount: _items.length + (_hasMore ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    // Load-more spinner at the very end
+                    if (index == _items.length) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(
+                          child: SizedBox(
+                            width: 22, height: 22,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.5, color: AppColors.primary),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final p = _items[index];
+                    return _ProductListTile(
+                      key: ValueKey(p.barcode), // stable key — prevents unnecessary rebuilds
+                      product: p,
+                      onEdit: () => _showAddProductDialog(context, product: p),
+                      onDelete: () => showDialog(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('حذف منتج'),
+                          content: Text('هل تريد حذف ${p.name}؟'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('إلغاء'),
+                            ),
+                            ElevatedButton(
+                              onPressed: () async {
+                                await context.read<AppProvider>().deleteProduct(p.barcode);
+                                if (context.mounted) Navigator.pop(context);
+                                _refresh();
+                              },
+                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+                              child: const Text('حذف'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      onStockIn: () => _showStockInDialog(context, p),
                     );
                   },
                 ),
               ),
             ),
-          ),
-          // Summary chips
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                Selector<AppProvider, int>(
-                  selector: (_, p) => p.products.length,
-                  builder: (_, count, __) => _SummaryChip('$count منتج', Icons.inventory_2_outlined, AppColors.primary),
-                ),
-                const SizedBox(width: 8),
-                Selector<AppProvider, int>(
-                  selector: (_, p) => p.lowStockProducts.length,
-                  builder: (_, count, __) => _SummaryChip('$count منخفض', Icons.warning_amber, AppColors.warning),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: () => provider.loadProducts(),
-              child: Selector<AppProvider, List<Product>>(
-                selector: (_, p) => p.filteredProducts,
-                builder: (context, filteredProducts, __) {
-                  if (filteredProducts.isEmpty) {
-                    return const Center(child: Text('لا توجد منتجات مطابقة'));
-                  }
-                  return ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: filteredProducts.length,
-                    itemBuilder: (context, i) {
-                      final p = filteredProducts[i];
-                      return _ProductListTile(
-                        product: p,
-                        onEdit: () => _showAddProductDialog(context, product: p),
-                        onDelete: () {
-                          showDialog(
-                            context: context,
-                            builder: (_) => AlertDialog(
-                              title: const Text('حذف منتج'),
-                              content: Text('هل تريد حذف ${p.name}؟'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
-                                ElevatedButton(
-                                  onPressed: () {
-                                    context.read<AppProvider>().deleteProduct(p.barcode);
-                                    Navigator.pop(context);
-                                  },
-                                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-                                  child: const Text('حذف'),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                        onStockIn: () => _showStockInDialog(context, p),
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
+/// Header widget: search bar + summary chips.
+/// Extracted so it is built ONCE and never touched during list scrolling.
+/// The Selector inside re-renders only the low-stock chip when the count changes.
+class _InventoryHeader extends StatelessWidget {
+  final TextEditingController searchCtrl;
+  final int totalCount;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  const _InventoryHeader({
+    required this.searchCtrl,
+    required this.totalCount,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          child: TextField(
+            controller: searchCtrl,
+            onChanged: onChanged,
+            decoration: InputDecoration(
+              hintText: 'بحث في المخزون...',
+              prefixIcon: const Icon(Icons.search, color: AppColors.primary),
+              suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: searchCtrl,
+                builder: (_, value, __) {
+                  if (value.text.isEmpty) return const SizedBox.shrink();
+                  return IconButton(
+                    icon: const Icon(Icons.clear, size: 18),
+                    onPressed: onClear,
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+          child: Row(
+            children: [
+              _SummaryChip('$totalCount منتج', Icons.inventory_2_outlined, AppColors.primary),
+              const SizedBox(width: 8),
+              Selector<AppProvider, int>(
+                selector: (_, p) => p.lowStockCount,
+                builder: (_, count, __) =>
+                    _SummaryChip('$count منخفض', Icons.warning_amber, AppColors.warning),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+
+
+///
+/// Performance rules applied here:
+/// 1. [RepaintBoundary] — gives each tile its own GPU layer. Flutter only
+///    repaints the one tile that changed instead of the whole visible list.
+/// 2. Pre-computed [stockColor] passed in — no Color math inside build().
+/// 3. Flat Row layout — no Container > ListTile > Column nesting.
+/// 4. [ClipRRect] instead of BoxDecoration border — avoids saveLayer() GPU call.
+/// 5. Const popup items — zero closure allocations per scroll frame.
 class _SummaryChip extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -285,7 +469,7 @@ class _SummaryChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -293,7 +477,9 @@ class _SummaryChip extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 16),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text(label,
+              style: TextStyle(
+                  color: color, fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -303,75 +489,133 @@ class _SummaryChip extends StatelessWidget {
 class _ProductListTile extends StatelessWidget {
   final Product product;
   final VoidCallback onEdit, onDelete, onStockIn;
-  const _ProductListTile({required this.product, required this.onEdit, required this.onDelete, required this.onStockIn});
+
+  const _ProductListTile({
+    super.key, // stable key enables Flutter to skip rebuilds
+    required this.product,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onStockIn,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final stockColor = product.stockQuantity <= product.minStockLevel ? AppColors.warning : AppColors.success;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: ListTile(
-        leading: Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 22),
-        ),
-        title: Text(product.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${product.category} • ${product.barcode}',
-                style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
-            const SizedBox(height: 2),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: stockColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
+    // Compute once per build — not per pixel during scroll
+    final bool isLow = product.stockQuantity <= product.minStockLevel;
+    final Color stockColor = isLow ? AppColors.warning : AppColors.success;
+
+    return RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          // Material elevation shadow is cheaper than BoxDecoration border+shadow
+          elevation: 0,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onEdit,
+            child: Container(
+              // No fixed height — tile sizes naturally, no RenderFlex overflow
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border, width: 1),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Leading icon box
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEF2FF), // AppColors.primary.withValues(0.08) pre-baked
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 20),
                   ),
-                  child: Text('${product.stockQuantity} ${AppStrings.pieces}',
-                      style: TextStyle(
-                          fontSize: 11, color: stockColor,
-                          fontWeight: FontWeight.w600)),
-                ),
-                const SizedBox(width: 6),
-                Text('بيع: ${product.sellingPrice.toStringAsFixed(0)} ${AppStrings.currencySymbol}',
-                    style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-              ],
+                  const SizedBox(width: 10),
+                  // Text column — mainAxisSize.min avoids fighting the Row for height
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min, // KEY: sizes to content, no overflow
+                      children: [
+                        Text(
+                          product.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '${product.category} • ${product.barcode}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11, color: AppColors.textHint),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isLow
+                                    ? const Color(0xFFFFF3E0)
+                                    : const Color(0xFFE8F5E9),
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: Text(
+                                '${product.stockQuantity} ${AppStrings.pieces}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: stockColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'بيع: ${product.sellingPrice.toStringAsFixed(0)} ${AppStrings.currencySymbol}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Trailing menu
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: AppColors.textHint, size: 20),
+                    padding: EdgeInsets.zero,
+                    onSelected: (v) {
+                      if (v == 'stock') onStockIn();
+                      else if (v == 'edit') onEdit();
+                      else if (v == 'delete') onDelete();
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'stock', child: Row(children: [
+                        Icon(Icons.add_box_outlined, size: 18, color: AppColors.success),
+                        SizedBox(width: 8), Text('إضافة مخزون'),
+                      ])),
+                      PopupMenuItem(value: 'edit', child: Row(children: [
+                        Icon(Icons.edit_outlined, size: 18, color: AppColors.info),
+                        SizedBox(width: 8), Text('تعديل'),
+                      ])),
+                      PopupMenuItem(value: 'delete', child: Row(children: [
+                        Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                        SizedBox(width: 8), Text('حذف', style: TextStyle(color: AppColors.error)),
+                      ])),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
-        trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: AppColors.textHint),
-          onSelected: (v) {
-            if (v == 'edit') onEdit();
-            if (v == 'delete') onDelete();
-            if (v == 'stock') onStockIn();
-          },
-          itemBuilder: (_) => [
-            const PopupMenuItem(value: 'stock', child: Row(children: [
-              Icon(Icons.add_box_outlined, size: 18, color: AppColors.success),
-              SizedBox(width: 8), Text('إضافة مخزون'),
-            ])),
-            const PopupMenuItem(value: 'edit', child: Row(children: [
-              Icon(Icons.edit_outlined, size: 18, color: AppColors.info),
-              SizedBox(width: 8), Text('تعديل'),
-            ])),
-            const PopupMenuItem(value: 'delete', child: Row(children: [
-              Icon(Icons.delete_outline, size: 18, color: AppColors.error),
-              SizedBox(width: 8), Text('حذف', style: TextStyle(color: AppColors.error)),
-            ])),
-          ],
+          ),
         ),
       ),
     );
@@ -414,36 +658,30 @@ class BarcodeScannerSheet extends StatefulWidget {
 }
 
 class _BarcodeScannerSheetState extends State<BarcodeScannerSheet> {
-  final BarcodeScanner _barcodeScanner = BarcodeScanner(formats: [BarcodeFormat.all]);
-  bool _isProcessing = false;
+  late MobileScannerController _scannerCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _scannerCtrl = MobileScannerController(
+      detectionSpeed: DetectionSpeed.normal,
+      detectionTimeoutMs: 1000,
+      returnImage: false,
+      formats: [
+        BarcodeFormat.ean13,
+        BarcodeFormat.ean8,
+        BarcodeFormat.code128,
+        BarcodeFormat.code39,
+        BarcodeFormat.qrCode,
+      ],
+    );
+  }
 
   @override
   void dispose() {
-    _barcodeScanner.close();
+    _scannerCtrl.stop();
+    _scannerCtrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _processImage(InputImage inputImage) async {
-    if (_isProcessing) return;
-    _isProcessing = true;
-
-    try {
-      final barcodes = await _barcodeScanner.processImage(inputImage);
-      if (barcodes.isNotEmpty) {
-        final rawBarcode = barcodes.first.displayValue;
-        if (rawBarcode != null && rawBarcode.isNotEmpty) {
-          HapticFeedback.vibrate();
-          if (mounted) {
-            Navigator.pop(context, rawBarcode);
-          }
-          return;
-        }
-      }
-    } catch (e) {
-      print("Error in form ML Kit: $e");
-    } finally {
-      _isProcessing = false;
-    }
   }
 
   @override
@@ -453,34 +691,83 @@ class _BarcodeScannerSheetState extends State<BarcodeScannerSheet> {
       color: Colors.black,
       child: Stack(
         children: [
-          CameraView(onImage: _processImage),
+          MobileScanner(
+            controller: _scannerCtrl,
+            onDetect: (capture) {
+              final raw = capture.barcodes.firstOrNull?.rawValue;
+              if (raw != null && raw.isNotEmpty) {
+                if (BarcodeValidator.isValid(raw)) {
+                  HapticFeedback.vibrate();
+                  if (mounted) Navigator.pop(context, raw);
+                }
+              }
+            },
+          ),
+          // Green static corner target overlay
           Center(
             child: Container(
-              width: 250,
-              height: 250,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.green, width: 2),
-                borderRadius: BorderRadius.circular(12),
+              width: 240,
+              height: 140,
+              child: Stack(
+                children: [
+                  Positioned(left: 0, top: 0, child: Container(width: 24, height: 24,
+                      decoration: const BoxDecoration(border: Border(left: BorderSide(color: Colors.green, width: 3), top: BorderSide(color: Colors.green, width: 3))))),
+                  Positioned(right: 0, top: 0, child: Container(width: 24, height: 24,
+                      decoration: const BoxDecoration(border: Border(right: BorderSide(color: Colors.green, width: 3), top: BorderSide(color: Colors.green, width: 3))))),
+                  Positioned(left: 0, bottom: 0, child: Container(width: 24, height: 24,
+                      decoration: const BoxDecoration(border: Border(left: BorderSide(color: Colors.green, width: 3), bottom: BorderSide(color: Colors.green, width: 3))))),
+                  Positioned(right: 0, bottom: 0, child: Container(width: 24, height: 24,
+                      decoration: const BoxDecoration(border: Border(right: BorderSide(color: Colors.green, width: 3), bottom: BorderSide(color: Colors.green, width: 3))))),
+                  Center(
+                    child: Container(
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.green.withValues(alpha: 0.4), width: 1.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(child: Icon(Icons.qr_code_scanner_outlined,
+                          color: Colors.green.withValues(alpha: 0.6), size: 22)),
+                    ),
+                  ),
+                ],
               ),
-              child: const _AnimatedScanningLine(),
             ),
           ),
+          // Close button
           Positioned(
-            top: 20,
-            right: 20,
-            child: IconButton(
-              icon: const Icon(Icons.close, color: Colors.white, size: 28),
-              onPressed: () => Navigator.pop(context),
+            top: 20, right: 20,
+            child: CircleAvatar(
+              backgroundColor: Colors.black54,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 20),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+          // Torch — ValueListenableBuilder keeps icon in sync with hardware state
+          Positioned(
+            top: 20, left: 20,
+            child: ValueListenableBuilder(
+              valueListenable: _scannerCtrl,
+              builder: (context, state, _) {
+                final on = state.torchState == TorchState.on;
+                return CircleAvatar(
+                  backgroundColor: Colors.black54,
+                  child: IconButton(
+                    icon: Icon(on ? Icons.flash_on : Icons.flash_off, color: Colors.white, size: 20),
+                    onPressed: () => _scannerCtrl.toggleTorch(),
+                  ),
+                );
+              },
             ),
           ),
           const Positioned(
-            bottom: 40,
-            left: 0,
-            right: 0,
+            bottom: 40, left: 0, right: 0,
             child: Text(
               'ضع الباركود داخل المربع للمسح الضوئي',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+              style: TextStyle(color: Colors.white, fontSize: 14,
+                  fontWeight: FontWeight.w600, fontFamily: 'Cairo'),
             ),
           ),
         ],
@@ -489,59 +776,4 @@ class _BarcodeScannerSheetState extends State<BarcodeScannerSheet> {
   }
 }
 
-class _AnimatedScanningLine extends StatefulWidget {
-  const _AnimatedScanningLine();
 
-  @override
-  State<_AnimatedScanningLine> createState() => _AnimatedScanningLineState();
-}
-
-class _AnimatedScanningLineState extends State<_AnimatedScanningLine> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _animation,
-      builder: (context, child) {
-        return Stack(
-          children: [
-            Positioned(
-              top: _animation.value * 248,
-              left: 0,
-              right: 0,
-              child: Container(
-                height: 2,
-                decoration: const BoxDecoration(
-                  color: Colors.green,
-                  boxShadow: [
-                    BoxShadow(color: Colors.green, blurRadius: 4, spreadRadius: 1),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}

@@ -6,6 +6,7 @@ import '../../core/constants/app_strings.dart';
 import '../../core/providers/app_provider.dart';
 import '../../services/api_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'expenses_management_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -17,6 +18,14 @@ class ReportsScreen extends StatefulWidget {
 class _ReportsScreenState extends State<ReportsScreen>
     with AutomaticKeepAliveClientMixin {
   int _periodIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AppProvider>().loadDashboardStats();
+    });
+  }
 
   @override
   bool get wantKeepAlive => true;
@@ -137,8 +146,66 @@ class _ReportsScreenState extends State<ReportsScreen>
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
   
+              // Expenses Management Card
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ExpensesManagementScreen()),
+                  );
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.account_balance_wallet, color: Colors.redAccent),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'إدارة ومراقبة المصروفات',
+                              style: TextStyle(
+                                fontFamily: 'Cairo',
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            Text(
+                              'تنظيم وتصنيف مصاريف المتجر (طاقة، رواتب، إيجار، إلخ)',
+                              style: TextStyle(
+                                fontFamily: 'Cairo',
+                                fontSize: 11,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios, size: 16, color: AppColors.textHint),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
               // Revenue chart
               Selector<AppProvider, List<double>>(
                 selector: (_, p) => p.weeklySales,
@@ -164,7 +231,7 @@ class _ReportsScreenState extends State<ReportsScreen>
                                 barWidth: 3,
                                 belowBarData: BarAreaData(
                                   show: true,
-                                  color: AppColors.primary.withOpacity(0.1),
+                                  color: AppColors.primary.withValues(alpha: 0.1),
                                 ),
                                 dotData: const FlDotData(show: false),
                               ),

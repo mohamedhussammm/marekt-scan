@@ -112,6 +112,7 @@ class Sale {
   final DateTime createdAt;
   final String type; // 'sale' or 'expense'
   final String? cashierName;
+  bool isOffline;
 
   Sale({
     required this.id,
@@ -126,6 +127,7 @@ class Sale {
     required this.createdAt,
     this.type = 'sale',
     this.cashierName,
+    this.isOffline = false,
   });
 
   double get change => amountPaid - total;
@@ -198,8 +200,10 @@ class PettyExpense {
   final String cashierUsername;
   final String? shiftId;
   final double amount;
+  final String category;
   final String description;
   final DateTime timestamp;
+  bool isOffline;
 
   PettyExpense({
     required this.id,
@@ -207,8 +211,10 @@ class PettyExpense {
     required this.cashierUsername,
     this.shiftId,
     required this.amount,
+    required this.category,
     required this.description,
     required this.timestamp,
+    this.isOffline = false,
   });
 
   factory PettyExpense.fromJson(Map<String, dynamic> json) {
@@ -218,8 +224,46 @@ class PettyExpense {
       cashierUsername: json['cashierUsername'] ?? '',
       shiftId: json['shiftId'],
       amount: (json['amount'] ?? 0).toDouble(),
+      category: json['category'] ?? 'أخرى',
       description: json['description'] ?? '',
       timestamp: DateTime.parse(json['timestamp'] ?? json['createdAt']),
+      isOffline: json['isOffline'] == true,
     );
   }
+}
+
+class HeldOrder {
+  final String id;
+  final List<CartItem> items;
+  final DateTime timestamp;
+
+  HeldOrder({
+    required this.id,
+    required this.items,
+    required this.timestamp,
+  });
+
+  double get subtotal => items.fold(0.0, (sum, item) => sum + item.subtotal);
+  double get total => items.fold(0.0, (sum, item) => sum + item.total);
+  int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
+}
+
+class OfflineQueueItem {
+  final int id;
+  final String offlineId;
+  final String operation;
+  final Map<String, dynamic> payload;
+  final DateTime createdAt;
+  final int retries;
+  final String status;
+
+  OfflineQueueItem({
+    required this.id,
+    required this.offlineId,
+    required this.operation,
+    required this.payload,
+    required this.createdAt,
+    this.retries = 0,
+    this.status = 'pending',
+  });
 }

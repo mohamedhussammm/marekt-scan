@@ -44,7 +44,7 @@ class ReceiptDetailSheet extends StatelessWidget {
                 width: 48,
                 height: 5,
                 decoration: BoxDecoration(
-                  color: AppColors.border.withOpacity(0.8),
+                  color: AppColors.border.withValues(alpha: 0.8),
                   borderRadius: BorderRadius.circular(2.5),
                 ),
               ),
@@ -87,7 +87,7 @@ class ReceiptDetailSheet extends StatelessWidget {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.04),
+                            color: Colors.black.withValues(alpha: 0.04),
                             blurRadius: 10,
                             offset: const Offset(0, 4),
                           ),
@@ -181,7 +181,7 @@ class ReceiptDetailSheet extends StatelessWidget {
 
                           // Itemized Table Header
                           Container(
-                            color: AppColors.surfaceVariant.withOpacity(0.5),
+                            color: AppColors.surfaceVariant.withValues(alpha: 0.5),
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                             child: const Row(
                               children: [
@@ -344,7 +344,7 @@ class ReceiptDetailSheet extends StatelessWidget {
                                 Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: AppColors.primaryContainer.withOpacity(0.5),
+                                    color: AppColors.primaryContainer.withValues(alpha: 0.5),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Row(
@@ -386,7 +386,7 @@ class ReceiptDetailSheet extends StatelessWidget {
                           Container(
                             height: 8,
                             decoration: BoxDecoration(
-                              color: AppColors.border.withOpacity(0.5),
+                              color: AppColors.border.withValues(alpha: 0.5),
                               borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
                             ),
                             child: ClipPath(

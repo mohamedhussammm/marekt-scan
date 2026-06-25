@@ -1,34 +1,41 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
 import '../core/models/models.dart';
+import '../core/utils/barcode_validator.dart';
 import '../services/db_helper.dart';
 import '../services/api_service.dart';
+import '../services/sync_engine.dart';
+import 'package:uuid/uuid.dart';
+import 'dart:io';
 
+/// ScanningController — business logic for the POS barcode scanner.
+///
+/// Scanning engine is now [mobile_scanner] (ML Kit on Android, Apple Vision
+/// on iOS) so camera and detection are handled entirely by the MobileScanner
+/// widget in the UI layer.  This controller only deals with:
+///   • debouncing / cooldown
+///   • 3-tier product lookup (memory cache → SQLite → MongoDB)
+///   • cart state
+///   • checkout
 class ScanningController extends ChangeNotifier {
-  final BarcodeScanner _scanner = BarcodeScanner(formats: [
-    BarcodeFormat.ean13,
-    BarcodeFormat.ean8,
-    BarcodeFormat.code128,
-    BarcodeFormat.code39,
-    BarcodeFormat.qrCode,
-  ]);
   final DatabaseHelper _db = DatabaseHelper.instance;
   final ApiService _api = ApiService();
+  final SyncEngine _syncEngine = SyncEngine.instance;
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   List<CartItem> cartItems = [];
+  List<HeldOrder> heldOrders = [];
   Product? lastScannedProduct;
+
   String? unknownBarcode;
   Product? unregisteredProduct;
   bool isScanning = false;
-  bool isProcessing = false;
   bool pauseScanning = false;
   Timer? _lastScannedTimer;
 
-  // Blazing Fast Optimizations
+  // ── Performance: 3-tier lookup ──────────────────────────────────────────
   final Map<String, Product> _productCache = {};
   bool _hasVibrator = false;
   String? _lastBarcode;
@@ -47,73 +54,48 @@ class ScanningController extends ChangeNotifier {
   double get cartSubtotal =>
       cartItems.fold(0, (sum, item) => sum + (item.product.sellingPrice * item.quantity));
 
-  double get cartTax => cartSubtotal * 0.14; // Example 14% tax
-  
+  double get cartTax => cartSubtotal * 0.14;
+
   double get totalAmount => cartSubtotal + cartTax;
 
-  Future<void> processImage(InputImage inputImage) async {
-    if (isProcessing || pauseScanning || unknownBarcode != null || unregisteredProduct != null) return;
-    isProcessing = true; // Lock immediately to prevent frame overlapping
-    
-    try {
-      final barcodes = await _scanner.processImage(inputImage);
-      if (barcodes.isNotEmpty) {
-        final rawBarcode = barcodes.first.displayValue;
-        if (rawBarcode != null) {
-          await processBarcode(rawBarcode);
-        }
-      }
-    } catch (e) {
-      print("Error in ML Kit: $e");
-    } finally {
-      isProcessing = false; // Release lock for next frame
-    }
-  }
-
+  /// Called directly by the MobileScanner widget's onDetect callback.
   Future<void> processBarcode(String rawBarcode) async {
     if (pauseScanning || unknownBarcode != null || unregisteredProduct != null) return;
-    pauseScanning = true;
-    notifyListeners();
 
-    // 2.5 second scan cooldown to prevent multiple scans of the same/next product instantly
-    Timer(const Duration(milliseconds: 2500), () {
-      pauseScanning = false;
-      notifyListeners();
-    });
+    // ── Validation check to filter out misreads and wrong numbers ──
+    if (!BarcodeValidator.isValid(rawBarcode)) return;
 
-    // 1. Debounce matching barcode (allow scanning different barcodes instantly, but prevent same-barcode double scan)
+    // ── Debounce: ignore the same barcode scanned within 1.2 s ──────────
     final now = DateTime.now();
     if (rawBarcode == _lastBarcode && _lastBarcodeTime != null) {
-      final diff = now.difference(_lastBarcodeTime!);
-      if (diff.inMilliseconds < 1200) {
-        return; // Ignore rapid scan of the exact same product
-      }
+      if (now.difference(_lastBarcodeTime!).inMilliseconds < 1200) return;
     }
     _lastBarcode = rawBarcode;
     _lastBarcodeTime = now;
 
+    // ── Scan cooldown: prevent camera from flooding with new codes ───────
+    // Bug #9 fix: timer is in finally so it fires even when the lookup throws
+    // (e.g. network timeout). Without finally, a crash leaves pauseScanning=true
+    // for 2.5 s with no user feedback — scanner feels dead.
+    pauseScanning = true;
     try {
       Product? product;
 
-      // 2. Memory Cache First (O(1) - 0ms response time!)
-      if (_productCache.containsKey(rawBarcode)) {
-        product = _productCache[rawBarcode];
-      }
+      // 1. Memory cache — O(1), ~0 ms
+      product = _productCache[rawBarcode];
 
-      // 3. SQLite second (offline-first)
+      // 2. SQLite — offline-first, ~1–5 ms
       if (product == null) {
         product = await _db.getProductByBarcode(rawBarcode);
-        if (product != null) {
-          _productCache[rawBarcode] = product; // Populate memory cache
-        }
+        if (product != null) _productCache[rawBarcode] = product;
       }
 
-      // 4. MongoDB via Node.js if not cached
+      // 3. Backend (MongoDB via Node.js)
       if (product == null) {
         product = await _api.getProductByBarcode(rawBarcode);
         if (product != null) {
-          _productCache[rawBarcode] = product; // Populate memory cache
-          await _db.insertProduct(product); // Cache in SQLite
+          _productCache[rawBarcode] = product;
+          await _db.insertProduct(product);
         }
       }
 
@@ -121,9 +103,7 @@ class ScanningController extends ChangeNotifier {
         if (!product.isRegistered) {
           unregisteredProduct = product;
           notifyListeners();
-          if (_hasVibrator) {
-            Vibration.vibrate(duration: 200);
-          }
+          if (_hasVibrator) Vibration.vibrate(duration: 200);
           return;
         }
 
@@ -131,30 +111,28 @@ class ScanningController extends ChangeNotifier {
         _addToCart(product);
         notifyListeners();
 
-        // Auto-clear last scanned product after 5 seconds to clear UI visibility
+        // Auto-clear the scan result banner after 5 s
         _lastScannedTimer?.cancel();
         _lastScannedTimer = Timer(const Duration(seconds: 5), () {
           lastScannedProduct = null;
           notifyListeners();
         });
 
-        // ✅ Success: Non-blocking vibrate + beep (runs concurrently)
-        if (_hasVibrator) {
-          Vibration.vibrate(duration: 80);
-        }
-        _audioPlayer.play(AssetSource('sounds/beep.wav')).catchError((err) {
-          print("Audio Players error: $err");
-        });
+        // Non-blocking feedback (runs concurrently with UI update)
+        if (_hasVibrator) Vibration.vibrate(duration: 80);
+        _audioPlayer.play(AssetSource('sounds/beep.wav')).catchError((_) {});
       } else {
-        // ❌ Unknown barcode: long vibrate (no sound)
         unknownBarcode = rawBarcode;
         notifyListeners();
-        if (_hasVibrator) {
-          Vibration.vibrate(duration: 350);
-        }
+        if (_hasVibrator) Vibration.vibrate(duration: 350);
       }
     } catch (e) {
-      print("Error processing barcode: $e");
+      debugPrint('ScanningController.processBarcode error: $e');
+    } finally {
+      // Always schedule the cooldown reset, regardless of success or failure
+      Timer(const Duration(milliseconds: 2500), () {
+        pauseScanning = false;
+      });
     }
   }
 
@@ -162,7 +140,7 @@ class ScanningController extends ChangeNotifier {
     unregisteredProduct = null;
     notifyListeners();
   }
-  
+
   void clearUnknownBarcode() {
     unknownBarcode = null;
     notifyListeners();
@@ -170,11 +148,8 @@ class ScanningController extends ChangeNotifier {
 
   Future<bool> addNewProduct(Product product) async {
     try {
-      // Save to backend
-      final payload = product.toJson();
-      final result = await _api.addProduct(payload);
+      final result = await _api.addProduct(product.toJson());
       if (result) {
-        // Save to SQLite
         await _db.insertProduct(product);
         unknownBarcode = null;
         _addToCart(product);
@@ -183,7 +158,7 @@ class ScanningController extends ChangeNotifier {
       }
       return false;
     } catch (e) {
-      print("Error adding product: $e");
+      debugPrint('addNewProduct error: $e');
       return false;
     }
   }
@@ -195,28 +170,24 @@ class ScanningController extends ChangeNotifier {
     required int currentStock,
   }) async {
     try {
-      final updatedProduct = product.copyWith(
+      final updated = product.copyWith(
         costPrice: costPrice,
         sellingPrice: sellingPrice,
         stockQuantity: currentStock,
         isRegistered: true,
       );
-
-      final payload = updatedProduct.toJson();
-      final success = await _api.updateProduct(product.barcode, payload);
+      final success = await _api.updateProduct(product.barcode, updated.toJson());
       if (success) {
-        // Update database and caches
-        await _db.insertProduct(updatedProduct);
-        _productCache[product.barcode] = updatedProduct;
-
+        await _db.insertProduct(updated);
+        _productCache[product.barcode] = updated;
         unregisteredProduct = null;
-        _addToCart(updatedProduct);
+        _addToCart(updated);
         notifyListeners();
         return true;
       }
       return false;
     } catch (e) {
-      print("Error registering store product: $e");
+      debugPrint('registerStoreProduct error: $e');
       return false;
     }
   }
@@ -225,8 +196,8 @@ class ScanningController extends ChangeNotifier {
     final idx = cartItems.indexWhere((i) => i.product.barcode == product.barcode);
     final newList = List<CartItem>.from(cartItems);
     if (idx >= 0) {
-      final oldItem = newList[idx];
-      newList[idx] = CartItem(product: oldItem.product, quantity: oldItem.quantity + 1, discountPercent: oldItem.discountPercent);
+      final old = newList[idx];
+      newList[idx] = CartItem(product: old.product, quantity: old.quantity + 1, discountPercent: old.discountPercent);
     } else {
       newList.add(CartItem(product: product, quantity: 1));
     }
@@ -240,8 +211,8 @@ class ScanningController extends ChangeNotifier {
       if (qty <= 0) {
         newList.removeAt(idx);
       } else {
-        final oldItem = newList[idx];
-        newList[idx] = CartItem(product: oldItem.product, quantity: qty, discountPercent: oldItem.discountPercent);
+        final old = newList[idx];
+        newList[idx] = CartItem(product: old.product, quantity: qty, discountPercent: old.discountPercent);
       }
       cartItems = newList;
       notifyListeners();
@@ -258,31 +229,89 @@ class ScanningController extends ChangeNotifier {
   Future<Map<String, dynamic>> checkout(String paymentMethod) async {
     if (cartItems.isEmpty) return {'success': false, 'error': 'Cart is empty'};
 
+    final offlineId = const Uuid().v4();
     final payload = {
-      "items": cartItems.map((i) => {
-        "barcodeId": i.product.barcode,
-        "name": i.product.name,
-        "qty": i.quantity,
-        "unitPrice": i.product.sellingPrice,
-        "lineTotal": i.product.sellingPrice * i.quantity
-      }).toList(),
-      "totalAmount": totalAmount,
-      "paymentMethod": paymentMethod,
+      'offline_id': offlineId,
+      'items': cartItems
+          .map((i) => {
+                'barcodeId': i.product.barcode,
+                'name': i.product.name,
+                'qty': i.quantity,
+                'unitPrice': i.product.sellingPrice,
+                'lineTotal': i.product.sellingPrice * i.quantity,
+              })
+          .toList(),
+      'totalAmount': totalAmount,
+      'paymentMethod': paymentMethod,
     };
 
-    final result = await _api.checkout(payload);
-    
-    if (result['success'] == true) {
-      clearCart();
+    // Optimistically clear cart
+    clearCart();
+
+    try {
+      final result = await _api.checkout(payload).timeout(const Duration(seconds: 8));
+      if (result['success'] == true) {
+        result['isOffline'] = false;
+        return result;
+      } else {
+        await _syncEngine.enqueue('checkout', payload);
+        return {'success': true, 'isOffline': true};
+      }
+    } catch (_) {
+      await _syncEngine.enqueue('checkout', payload);
+      return {'success': true, 'isOffline': true};
     }
-    
-    return result;
+  }
+
+  void holdCurrentOrder() {
+    if (cartItems.isEmpty) return;
+    final newHeld = HeldOrder(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      items: List<CartItem>.from(cartItems),
+      timestamp: DateTime.now(),
+    );
+    heldOrders.add(newHeld);
+    clearCart();
+    notifyListeners();
+  }
+
+  void restoreHeldOrder(String id, {bool merge = false}) {
+    final idx = heldOrders.indexWhere((o) => o.id == id);
+    if (idx >= 0) {
+      final restored = heldOrders.removeAt(idx);
+      if (merge) {
+        final newList = List<CartItem>.from(cartItems);
+        for (final item in restored.items) {
+          final existIdx = newList.indexWhere((i) => i.product.barcode == item.product.barcode);
+          if (existIdx >= 0) {
+            final old = newList[existIdx];
+            newList[existIdx] = CartItem(
+              product: old.product,
+              quantity: old.quantity + item.quantity,
+              discountPercent: old.discountPercent,
+            );
+          } else {
+            newList.add(item);
+          }
+        }
+        cartItems = newList;
+      } else {
+        cartItems = restored.items;
+      }
+      notifyListeners();
+    }
+  }
+
+
+  void deleteHeldOrder(String id) {
+    heldOrders.removeWhere((o) => o.id == id);
+    notifyListeners();
   }
 
   @override
+
   void dispose() {
     _lastScannedTimer?.cancel();
-    _scanner.close();
     _audioPlayer.dispose();
     super.dispose();
   }

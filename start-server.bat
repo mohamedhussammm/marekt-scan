@@ -21,7 +21,7 @@ echo   https://anytime-font-drainable.ngrok-free.dev/api
 echo.
 echo This URL NEVER changes - it works from any network!
 echo.
-start "ngrok Tunnel" %NGROK% http --domain=anytime-font-drainable.ngrok-free.dev 3000
+start "ngrok Tunnel" %NGROK% http --domain=anytime-font-drainable.ngrok-free.dev 5000
 
 echo App Settings ^> API Server Address:
 echo   https://anytime-font-drainable.ngrok-free.dev/api

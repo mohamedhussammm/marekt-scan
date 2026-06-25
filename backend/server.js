@@ -12,6 +12,7 @@ const authRoute = require('./routes/auth');
 const shiftsRoute = require('./routes/shifts');
 const expensesRoute = require('./routes/expenses');
 const logsRoute = require('./routes/logs');
+const syncRoute = require('./routes/sync');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,6 +59,7 @@ app.use('/api/auth', authRoute);
 app.use('/api/shifts', shiftsRoute);
 app.use('/api/expenses', expensesRoute);
 app.use('/api/logs', logsRoute);
+app.use('/api/sync', syncRoute);
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {

@@ -1,11 +1,24 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../../services/api_service.dart';
 import '../../services/db_helper.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'dart:async';
+import 'package:uuid/uuid.dart';
+import '../../services/sync_engine.dart';
 
 class AppProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
   final DatabaseHelper _db = DatabaseHelper.instance;
+  final SyncEngine _syncEngine = SyncEngine.instance;
+  
+  SyncEngine get syncEngine => _syncEngine;
+
+  /// Expose the ApiService so screens can make their own isolated API calls
+  /// (e.g. paginated low-stock fetch) without triggering full provider rebuilds.
+  ApiService get api => _api;
 
   final List<Product> _products = [];
   final List<Sale> _sales = [];
@@ -37,6 +50,7 @@ class AppProvider extends ChangeNotifier {
   double _netProfit = 0.0;
   int _totalOrdersCount = 0;
   int _lowStockCount = 0;
+  int _totalProductsCount = 0;
   List<double> _weeklySales = List.filled(7, 0.0);
   List<dynamic> _topProductsList = [];
   List<dynamic> _categoriesAggregationList = [];
@@ -100,6 +114,7 @@ class AppProvider extends ChangeNotifier {
   double get netProfit => _netProfit;
   int get totalOrdersCount => _totalOrdersCount;
   int get lowStockCount => _lowStockCount;
+  int get totalProductsCount => _totalProductsCount;
   List<double> get weeklySales => _weeklySales;
   List<dynamic> get topProductsList => _topProductsList;
   List<dynamic> get categoriesAggregationList => _categoriesAggregationList;
@@ -132,10 +147,11 @@ class AppProvider extends ChangeNotifier {
         ApiService.currentUserRole = _userRole;
         ApiService.currentUsername = _username;
 
-        // Concurrent parallel load of settings, products, dashboard statistics, and active shift
+        // Parallel load: settings, dashboard stats, active shift.
+        // Products are NO longer bulk-loaded here — the inventory screen
+        // fetches its own paginated data (Bug #4 fix: no 3200-item payload on login).
         await Future.wait([
           loadSettings(),
-          loadProducts(),
           loadDashboardStats(),
           loadActiveShift(),
         ]);
@@ -193,10 +209,11 @@ class AppProvider extends ChangeNotifier {
         ApiService.currentUserRole = _userRole;
         ApiService.currentUsername = _username;
 
-        // Concurrent parallel load of settings, products, dashboard statistics, and active shift
+        // Parallel load: settings, dashboard stats, active shift.
+        // Products are NO longer bulk-loaded here — the inventory screen
+        // fetches its own paginated data (Bug #4 fix: no 3200-item payload on login).
         await Future.wait([
           loadSettings(),
-          loadProducts(),
           loadDashboardStats(),
           loadActiveShift(),
         ]);
@@ -241,8 +258,10 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> loadProducts() async {
+    // P1 fix: removed notifyListeners() at start with _isLoading=true.
+    // That was triggering a full rebuild BEFORE data was ready — pointless.
+    // One notification at the end is enough.
     _isLoading = true;
-    notifyListeners();
 
     // 1. Try to fetch from Backend
     List<Product> fetched = await _api.getAllProducts();
@@ -261,10 +280,10 @@ class AppProvider extends ChangeNotifier {
 
     _updateFilterCaches();
     _isLoading = false;
-    notifyListeners();
+    notifyListeners(); // Single notification with final state
   }
 
-  Future<void> loadDashboardStats() async {
+  Future<void> loadDashboardStats({bool rethrowNetworkErrors = false}) async {
     try {
       final results = await Future.wait([
         _api.getDashboardSummary(),
@@ -287,8 +306,15 @@ class AppProvider extends ChangeNotifier {
         _netProfit = double.tryParse(summary['netProfit'].toString()) ?? 0.0;
         _totalOrdersCount = int.tryParse(summary['totalOrders'].toString()) ?? 0;
         _lowStockCount = int.tryParse(summary['lowStockCount'].toString()) ?? 0;
+        _totalProductsCount = int.tryParse(summary['totalProductsCount'].toString()) ?? 0;
         _todayExpenses = double.tryParse((summary['todayExpenses'] ?? 0).toString()) ?? 0.0;
         _cashOnHand = double.tryParse((summary['cashOnHand'] ?? 0).toString()) ?? 0.0;
+
+        // Persist counts to shared_preferences for robust offline dashboard loading
+        SharedPreferences.getInstance().then((prefs) {
+          prefs.setInt('cached_total_products', _totalProductsCount);
+          prefs.setInt('cached_low_stock', _lowStockCount);
+        }).catchError((_) {});
       }
 
       _weeklySales = chart;
@@ -300,17 +326,19 @@ class AppProvider extends ChangeNotifier {
         try {
           final List<dynamic> itemsData = tx['items'] ?? [];
           final items = itemsData.map((it) {
+            final double price = (it['unitPrice'] ?? 0).toDouble();
+            final int qty = (it['qty'] ?? 1).toInt();
             final prod = findByBarcode(it['barcodeId']) ?? Product(
               id: it['barcodeId'],
               barcode: it['barcodeId'],
               name: it['name'],
               category: 'عام',
-              costPrice: it['unitPrice'] * 0.7,
-              sellingPrice: it['unitPrice'],
+              costPrice: price * 0.7,
+              sellingPrice: price,
               stockQuantity: 100,
               minStockLevel: 10,
             );
-            return CartItem(product: prod, quantity: it['qty']);
+            return CartItem(product: prod, quantity: qty);
           }).toList();
 
           _sales.add(Sale(
@@ -332,7 +360,23 @@ class AppProvider extends ChangeNotifier {
         }
       }
     } catch (e) {
-      print("Error loading dashboard stats: $e");
+      // Offline fallback: load count metrics from cached shared preferences or SQLite
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        _totalProductsCount = prefs.getInt('cached_total_products') ?? await _db.getProductCount();
+        _lowStockCount = prefs.getInt('cached_low_stock') ?? await _db.getLowStockCount();
+      } catch (dbErr) {
+        debugPrint('Failed to load offline counts: $dbErr');
+      }
+
+      // Rethrow network-level errors only if requested, so callers (e.g. dashboard timer) can
+      // detect offline state and apply backoff. Otherwise, swallow/log to prevent unhandled async crashes.
+      final errStr = e.toString();
+      final isNetworkError = e is SocketException || errStr.contains('SocketException') || errStr.contains('Connection failed');
+      if (rethrowNetworkErrors && isNetworkError) {
+        rethrow;
+      }
+      debugPrint('loadDashboardStats error: $e');
     }
 
     notifyListeners();
@@ -434,6 +478,8 @@ class AppProvider extends ChangeNotifier {
     if (_cart.isEmpty) return null;
 
     final receiptNumber = 'INV-${(_sales.length + 1).toString().padLeft(3, '0')}';
+    final offlineId = const Uuid().v4();
+    
     final itemsPayload = _cart.map((i) => {
       'barcodeId': i.product.barcode,
       'name': i.product.name,
@@ -443,127 +489,174 @@ class AppProvider extends ChangeNotifier {
     }).toList();
 
     final payload = {
+      'offline_id': offlineId,
       'items': itemsPayload,
       'totalAmount': cartTotal,
       'paymentMethod': paymentMethod,
     };
 
-    final response = await _api.checkout(payload);
-    if (response['success'] == true) {
-      final sale = Sale(
-        id: response['transactionId'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        receiptNumber: response['receiptNumber'] ?? receiptNumber,
-        items: List.from(_cart),
-        subtotal: cartSubtotal,
-        discount: 0,
-        tax: cartTax,
-        total: cartTotal,
-        amountPaid: amountPaid,
-        paymentMethod: paymentMethod,
-        createdAt: DateTime.now(),
-      );
+    final sale = Sale(
+      id: offlineId,
+      receiptNumber: receiptNumber,
+      items: List.from(_cart),
+      subtotal: cartSubtotal,
+      discount: 0,
+      tax: cartTax,
+      total: cartTotal,
+      amountPaid: amountPaid,
+      paymentMethod: paymentMethod,
+      createdAt: DateTime.now(),
+    );
 
-      // Decrement stock levels locally
-      for (final item in _cart) {
-        final pIndex = _products.indexWhere((p) => p.barcode == item.product.barcode);
-        if (pIndex >= 0) {
-          _products[pIndex].stockQuantity -= item.quantity;
-          if (_products[pIndex].stockQuantity < 0) {
-            _products[pIndex].stockQuantity = 0;
-          }
-          await _db.insertProduct(_products[pIndex]); // Sync SQLite
+    // Decrement stock levels locally
+    for (final item in _cart) {
+      final pIndex = _products.indexWhere((p) => p.barcode == item.product.barcode);
+      if (pIndex >= 0) {
+        _products[pIndex].stockQuantity -= item.quantity;
+        if (_products[pIndex].stockQuantity < 0) {
+          _products[pIndex].stockQuantity = 0;
         }
+        await _db.insertProduct(_products[pIndex]); // Sync SQLite
       }
-
-      _sales.add(sale);
-      _cart.clear();
-      _updateFilterCaches();
-      notifyListeners(); // Notify listeners immediately to clear UI block
-      loadDashboardStats(); // Refresh dashboard data in the background (unawaited)
-      return sale;
     }
-    return null;
+
+    _sales.add(sale);
+    _cart.clear();
+    _updateFilterCaches();
+    notifyListeners(); // Notify listeners immediately to clear UI block
+
+    try {
+      final response = await _api.checkout(payload).timeout(const Duration(seconds: 8));
+      if (response['success'] == true) {
+        sale.isOffline = false;
+        // Optionally update the sale ID if server returned one
+        loadDashboardStats(); // Refresh dashboard data in the background
+      } else {
+        sale.isOffline = true;
+        await _syncEngine.enqueue('checkout', payload);
+      }
+    } on SocketException catch (_) {
+      sale.isOffline = true;
+      await _syncEngine.enqueue('checkout', payload);
+    } on TimeoutException catch (_) {
+      sale.isOffline = true;
+      await _syncEngine.enqueue('checkout', payload);
+    } catch (_) {
+      sale.isOffline = true;
+      await _syncEngine.enqueue('checkout', payload);
+    }
+
+    return sale;
   }
 
   Future<bool> addProduct(Product product) async {
     _isLoading = true;
-    notifyListeners();
 
-    final success = await _api.addProduct(product.toJson());
-    if (success) {
-      await _db.insertProduct(product);
-      final existingIdx = _products.indexWhere((p) => p.barcode == product.barcode);
-      if (existingIdx >= 0) {
-        _products[existingIdx] = product;
-      } else {
-        _products.add(product);
-      }
-      _updateFilterCaches();
-      _isLoading = false;
-      notifyListeners();
-      loadDashboardStats(); // Run in the background (unawaited)
-      return true;
+    final offlineId = const Uuid().v4();
+    final payload = product.toJson();
+    payload['offline_id'] = offlineId;
+
+    await _db.insertProduct(product);
+    final existingIdx = _products.indexWhere((p) => p.barcode == product.barcode);
+    if (existingIdx >= 0) {
+      _products[existingIdx] = product;
+    } else {
+      _products.add(product);
     }
-
+    _updateFilterCaches();
     _isLoading = false;
     notifyListeners();
-    return false;
+
+    try {
+      final success = await _api.addProduct(payload).timeout(const Duration(seconds: 8));
+      if (!success) {
+        await _syncEngine.enqueue('add_product', payload);
+      } else {
+        loadDashboardStats(); // Run in the background (unawaited)
+      }
+    } catch (_) {
+      await _syncEngine.enqueue('add_product', payload);
+    }
+    
+    return true;
   }
 
   Future<bool> updateProduct(Product product) async {
     _isLoading = true;
-    notifyListeners();
 
-    final success = await _api.updateProduct(product.barcode, product.toJson());
-    if (success) {
-      await _db.insertProduct(product);
-      final idx = _products.indexWhere((p) => p.barcode == product.barcode);
-      if (idx >= 0) {
-        _products[idx] = product;
-      }
-      _updateFilterCaches();
-      _isLoading = false;
-      notifyListeners();
-      loadDashboardStats(); // Run in the background (unawaited)
-      return true;
+    final offlineId = const Uuid().v4();
+    final payload = product.toJson();
+    payload['offline_id'] = offlineId;
+
+    await _db.insertProduct(product);
+    final idx = _products.indexWhere((p) => p.barcode == product.barcode);
+    if (idx >= 0) {
+      _products[idx] = product;
     }
-
+    _updateFilterCaches();
     _isLoading = false;
     notifyListeners();
-    return false;
+
+    try {
+      final success = await _api.updateProduct(product.barcode, payload).timeout(const Duration(seconds: 8));
+      if (!success) {
+        await _syncEngine.enqueue('update_product', payload);
+      } else {
+        loadDashboardStats(); // Run in the background (unawaited)
+      }
+    } catch (_) {
+      await _syncEngine.enqueue('update_product', payload);
+    }
+
+    return true;
   }
 
   Future<bool> deleteProduct(String barcode) async {
     _isLoading = true;
-    notifyListeners();
+    
+    final offlineId = const Uuid().v4();
+    final payload = {'barcodeId': barcode, 'offline_id': offlineId};
 
-    final success = await _api.deleteProduct(barcode);
-    if (success) {
-      await _db.deleteProduct(barcode);
-      _products.removeWhere((p) => p.barcode == barcode);
-      _updateFilterCaches();
-      _isLoading = false;
-      notifyListeners();
-      loadDashboardStats(); // Run in the background (unawaited)
-      return true;
-    }
-
+    await _db.deleteProduct(barcode);
+    _products.removeWhere((p) => p.barcode == barcode);
+    _updateFilterCaches();
     _isLoading = false;
     notifyListeners();
-    return false;
+
+    try {
+      final success = await _api.deleteProduct(barcode).timeout(const Duration(seconds: 8));
+      if (!success) {
+        await _syncEngine.enqueue('delete_product', payload);
+      } else {
+        loadDashboardStats(); // Run in the background (unawaited)
+      }
+    } catch (_) {
+      await _syncEngine.enqueue('delete_product', payload);
+    }
+
+    return true;
   }
 
   Future<void> addStock(String productId, int quantity) async {
     final index = _products.indexWhere((p) => p.id == productId);
     if (index >= 0) {
       final barcode = _products[index].barcode;
-      final success = await _api.updateStock(barcode, quantity);
-      
-      if (success) {
-        _products[index].stockQuantity += quantity;
-        await _db.insertProduct(_products[index]);
-        notifyListeners(); // Notify listeners immediately
-        loadDashboardStats(); // Run in the background (unawaited)
+      final offlineId = const Uuid().v4();
+      final payload = {'barcodeId': barcode, 'quantity': quantity, 'offline_id': offlineId};
+
+      _products[index].stockQuantity += quantity;
+      await _db.insertProduct(_products[index]);
+      notifyListeners(); // Notify listeners immediately
+
+      try {
+        final success = await _api.updateStock(barcode, quantity).timeout(const Duration(seconds: 8));
+        if (!success) {
+          await _syncEngine.enqueue('update_stock', payload);
+        } else {
+          loadDashboardStats(); // Run in the background (unawaited)
+        }
+      } catch (_) {
+        await _syncEngine.enqueue('update_stock', payload);
       }
     }
   }
@@ -622,18 +715,43 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  Future<Map<String, dynamic>> recordPettyExpense(double amount, String description) async {
+  Future<Map<String, dynamic>> recordPettyExpense(double amount, String description, {String category = 'أخرى'}) async {
+    final offlineId = const Uuid().v4();
+    final payload = {
+      'amount': amount,
+      'description': description,
+      'category': category,
+      'offline_id': offlineId,
+    };
+
+    // Optimistically assume it works (no local state for expenses beyond dashboard stats)
+    
     try {
-      final res = await _api.recordExpense(amount, description);
+      final res = await _api.recordExpense(amount, description, category: category).timeout(const Duration(seconds: 8));
       if (res['success'] == true) {
-        await loadDashboardStats();
+        loadDashboardStats();
         notifyListeners();
-        return {'success': true};
+        return {'success': true, 'isOffline': false};
+      } else {
+        await _syncEngine.enqueue('add_expense', payload);
+        return {'success': true, 'isOffline': true};
       }
-      return {'success': false, 'error': res['error'] ?? 'فشل تسجيل المصروف'};
     } catch (e) {
-      return {'success': false, 'error': e.toString()};
+      await _syncEngine.enqueue('add_expense', payload);
+      return {'success': true, 'isOffline': true};
     }
+  }
+
+  Future<List<PettyExpense>> fetchAllExpenses({String? category}) async {
+    return await _api.getExpenses(all: true, category: category);
+  }
+
+  Future<List<PettyExpense>> getOfflineExpenses() async {
+    return await _db.getOfflineExpenses();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchExpenseCategorySummary() async {
+    return await _api.getExpenseCategorySummary();
   }
 
   Future<void> fetchShiftHistory() async {

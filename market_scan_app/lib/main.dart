@@ -15,8 +15,10 @@ import 'screens/reports/reports_screen.dart';
 import 'screens/alerts/low_stock_alerts_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/register/register_screen.dart';
+import 'screens/transactions/transaction_history_screen.dart';
 import 'widgets/main_navigation.dart';
 import 'services/api_service.dart';
+import 'services/sync_engine.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +31,7 @@ Future<void> main() async {
   runApp(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider.value(value: SyncEngine.instance..startMonitoring()),
         ChangeNotifierProvider(create: (_) => AppProvider()),
         ChangeNotifierProvider(create: (_) => ScanningController()),
       ],
@@ -65,6 +68,7 @@ class MarketScanApp extends StatelessWidget {
         '/reports': (_) => const ReportsScreen(),
         '/alerts': (_) => const LowStockAlertsScreen(),
         '/settings': (_) => const SettingsScreen(),
+        '/transactions-history': (_) => const TransactionHistoryScreen(),
       },
     );
   }

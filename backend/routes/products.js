@@ -4,6 +4,83 @@ const Product = require('../models/Product');
 const StoreInventory = require('../models/StoreInventory');
 const { checkOwner } = require('../middleware/auth');
 
+// ─── GET /api/products/low-stock ─────────────────────────────────────────────
+// Returns only low-stock items for a store, paginated.
+// MongoDB does the filtering — no need to send 3200 products to the client.
+// Query params: page (default 1), limit (default 30)
+router.get('/low-stock', async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 30);
+    const skip = (page - 1) * limit;
+    const storeName = req.storeName;
+
+    // Aggregate: join StoreInventory with Product where currentStock <= minThreshold
+    const pipeline = [
+      {
+        $match: {
+          storeName: storeName,
+          $expr: { $lte: ['$currentStock', '$minThreshold'] }
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'barcodeId',
+          foreignField: 'barcodeId',
+          as: 'productInfo'
+        }
+      },
+      { $unwind: { path: '$productInfo', preserveNullAndEmptyArrays: false } },
+      {
+        $project: {
+          _id: '$productInfo._id',
+          barcodeId: '$barcodeId',
+          name: '$productInfo.name',
+          category: '$productInfo.category',
+          sellingPrice: '$sellingPrice',
+          costPrice: '$costPrice',
+          currentStock: '$currentStock',
+          minThreshold: '$minThreshold',
+          isRegistered: { $literal: true }
+        }
+      },
+      { $sort: { currentStock: 1 } } // Most critical first
+    ];
+
+    const countPipeline = [
+      {
+        $match: {
+          storeName: storeName,
+          $expr: { $lte: ['$currentStock', '$minThreshold'] }
+        }
+      },
+      { $count: 'total' }
+    ];
+
+    const [items, countResult] = await Promise.all([
+      StoreInventory.aggregate([...pipeline, { $skip: skip }, { $limit: limit }]),
+      StoreInventory.aggregate(countPipeline)
+    ]);
+
+    const total = countResult[0]?.total ?? 0;
+
+    res.json({
+      success: true,
+      products: items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasMore: skip + items.length < total
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Get product by barcode
 router.get('/:barcode', async (req, res) => {
   try {
@@ -108,38 +185,78 @@ router.put('/:barcode/stock', checkOwner, async (req, res) => {
   }
 });
 
-// Get all products
+// Get products — paginated, searchable, filterable
+// Query params:
+//   page     (default 1)
+//   limit    (default 40, max 100)
+//   search   (partial name or barcode match, case-insensitive)
+//   category (exact match, empty = all)
 router.get('/', async (req, res) => {
   try {
-    const products = await Product.find();
-    const inventories = await StoreInventory.find({ storeName: req.storeName });
-    
-    // Map inventories by barcodeId for O(1) lookups
+    const page     = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit    = Math.min(100, parseInt(req.query.limit) || 40);
+    const skip     = (page - 1) * limit;
+    const search   = req.query.search   ? req.query.search.trim()   : '';
+    const category = req.query.category ? req.query.category.trim() : '';
+
+    // Build MongoDB filter on the Product catalog
+    const productFilter = {};
+    if (search) {
+      productFilter.$or = [
+        { name:      { $regex: search, $options: 'i' } },
+        { barcodeId: { $regex: search, $options: 'i' } },
+      ];
+    }
+    if (category) {
+      productFilter.category = category;
+    }
+
+    const [products, total] = await Promise.all([
+      Product.find(productFilter).skip(skip).limit(limit).lean(),
+      Product.countDocuments(productFilter),
+    ]);
+
+    // Fetch only the inventory rows we actually need (by the page of barcodes)
+    const barcodeIds = products.map(p => p.barcodeId);
+    const inventories = await StoreInventory.find({
+      storeName: req.storeName,
+      barcodeId: { $in: barcodeIds },
+    }).lean();
+
     const invMap = {};
-    inventories.forEach(inv => {
-      invMap[inv.barcodeId] = inv;
-    });
-    
+    inventories.forEach(inv => { invMap[inv.barcodeId] = inv; });
+
     const mergedProducts = products.map(p => {
       const inv = invMap[p.barcodeId];
       return {
-        _id: p._id,
-        barcodeId: p.barcodeId,
-        name: p.name,
-        category: p.category,
+        _id:          p._id,
+        barcodeId:    p.barcodeId,
+        name:         p.name,
+        category:     p.category,
         sellingPrice: inv ? inv.sellingPrice : 0,
-        costPrice: inv ? inv.costPrice : 0,
+        costPrice:    inv ? inv.costPrice    : 0,
         currentStock: inv ? inv.currentStock : 0,
         minThreshold: inv ? inv.minThreshold : 10,
-        isRegistered: !!inv
+        isRegistered: !!inv,
       };
     });
-    
-    res.json({ success: true, products: mergedProducts });
+
+    res.json({
+      success: true,
+      products: mergedProducts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasMore: skip + mergedProducts.length < total,
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 // Update product
 router.put('/:barcode', checkOwner, async (req, res) => {

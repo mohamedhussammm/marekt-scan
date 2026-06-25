@@ -23,8 +23,8 @@ router.get('/summary', async (req, res) => {
     const todayRevenue = todayTransactions.reduce((sum, t) => sum + t.totalAmount, 0);
     const todayOrdersCount = todayTransactions.length;
 
-    // Total products registered in this store's inventory
-    const totalProductsCount = await StoreInventory.countDocuments({ storeName: req.storeName });
+    // Total products registered in the global catalog
+    const totalProductsCount = await Product.countDocuments({});
     
     // Low Stock count for this store
     const lowStockProducts = await StoreInventory.find({
