@@ -9,6 +9,7 @@ import '../../core/models/models.dart';
 import '../../core/providers/app_provider.dart';
 import '../../core/utils/barcode_validator.dart';
 import '../../services/api_service.dart';
+import '../../services/db_helper.dart';
 
 /// InventoryScreen — Senior Flutter pattern:
 ///
@@ -101,7 +102,43 @@ class _InventoryScreenState extends State<InventoryScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _error = e.toString(); _isInitialLoading = false; _isLoadingMore = false; });
+      // ── OFFLINE FALLBACK in UI: fetch from local SQLite directly ────────────────────────
+      try {
+        final DatabaseHelper db = DatabaseHelper.instance;
+        final allCached = await db.getAllProducts();
+        final search = _searchCtrl.text.trim();
+
+        // Apply search locally
+        final filtered = allCached.where((p) {
+          final matchSearch = search.isEmpty ||
+              p.name.toLowerCase().contains(search.toLowerCase()) ||
+              p.barcode.toLowerCase().contains(search.toLowerCase());
+          return matchSearch;
+        }).toList();
+
+        // Paginate locally
+        final start = (page - 1) * _pageSize;
+        final end = (start + _pageSize).clamp(0, filtered.length);
+        final pageItems = start < filtered.length ? filtered.sublist(start, end) : <Product>[];
+
+        setState(() {
+          if (page == 1) { _items..clear()..addAll(pageItems); }
+          else           { _items.addAll(pageItems); }
+          _currentPage      = page;
+          _totalCount       = filtered.length;
+          _hasMore          = end < filtered.length;
+          _isFromCache      = true;
+          _isInitialLoading = false;
+          _isLoadingMore    = false;
+          _error            = null;
+        });
+      } catch (err) {
+        setState(() {
+          _error = e.toString();
+          _isInitialLoading = false;
+          _isLoadingMore = false;
+        });
+      }
     }
   }
 
@@ -216,7 +253,18 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ElevatedButton(
             onPressed: () async {
               final qty = int.tryParse(ctrl.text) ?? 0;
-              if (qty > 0) await context.read<AppProvider>().addStock(product.id, qty);
+              if (qty > 0) {
+                await context.read<AppProvider>().addStock(product.id, qty);
+                if (mounted) {
+                  setState(() {
+                    final idx = _items.indexWhere((item) => item.barcode == product.barcode);
+                    if (idx >= 0) {
+                      final old = _items[idx];
+                      _items[idx] = old.copyWith(stockQuantity: old.stockQuantity + qty);
+                    }
+                  });
+                }
+              }
               if (ctx.mounted) Navigator.pop(ctx);
               _refresh();
             },
@@ -365,7 +413,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             ),
                             ElevatedButton(
                               onPressed: () async {
-                                await context.read<AppProvider>().deleteProduct(p.barcode);
+                                final barcode = p.barcode;
+                                await context.read<AppProvider>().deleteProduct(barcode);
+                                if (mounted) {
+                                  setState(() {
+                                    _items.removeWhere((item) => item.barcode == barcode);
+                                    _totalCount = (_totalCount - 1).clamp(0, 999999);
+                                  });
+                                }
                                 if (context.mounted) Navigator.pop(context);
                                 _refresh();
                               },
@@ -593,9 +648,13 @@ class _ProductListTile extends StatelessWidget {
                     icon: const Icon(Icons.more_vert, color: AppColors.textHint, size: 20),
                     padding: EdgeInsets.zero,
                     onSelected: (v) {
-                      if (v == 'stock') onStockIn();
-                      else if (v == 'edit') onEdit();
-                      else if (v == 'delete') onDelete();
+                      if (v == 'stock') {
+                        onStockIn();
+                      } else if (v == 'edit') {
+                        onEdit();
+                      } else if (v == 'delete') {
+                        onDelete();
+                      }
                     },
                     itemBuilder: (_) => const [
                       PopupMenuItem(value: 'stock', child: Row(children: [

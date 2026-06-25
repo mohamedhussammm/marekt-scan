@@ -176,10 +176,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                   ),
                   Selector<AppProvider, int>(
-                    selector: (_, p) => p.todayOrdersCount,
-                    builder: (context, todayOrdersCount, __) => _StatCard(
+                    selector: (_, p) => p.totalOrdersCount,
+                    builder: (context, totalOrdersCount, __) => _StatCard(
                       title: AppStrings.totalOrders,
-                      value: '$todayOrdersCount',
+                      value: '$totalOrdersCount',
                       icon: Icons.receipt_long_outlined,
                       color: AppColors.info,
                       onTap: isCashier ? null : () => Navigator.pushNamed(context, '/reports'),

@@ -21,7 +21,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -48,6 +48,23 @@ CREATE TABLE offline_queue (
   created_at TEXT NOT NULL,
   retries INTEGER DEFAULT 0,
   status TEXT DEFAULT 'pending'
+)
+''');
+          } catch (_) {}
+        }
+        if (oldVersion < 5) {
+          try {
+            await db.execute('''
+CREATE TABLE transactions (
+  id TEXT PRIMARY KEY,
+  receipt_number TEXT NOT NULL,
+  total_amount REAL NOT NULL,
+  payment_method TEXT NOT NULL,
+  cashier_name TEXT NOT NULL,
+  items_json TEXT NOT NULL,
+  type TEXT DEFAULT 'sale',
+  created_at TEXT NOT NULL,
+  is_offline INTEGER DEFAULT 0
 )
 ''');
           } catch (_) {}
@@ -92,6 +109,20 @@ CREATE TABLE offline_queue (
   created_at TEXT NOT NULL,
   retries INTEGER DEFAULT 0,
   status TEXT DEFAULT 'pending'
+)
+''');
+
+    await db.execute('''
+CREATE TABLE transactions (
+  id TEXT PRIMARY KEY,
+  receipt_number TEXT NOT NULL,
+  total_amount REAL NOT NULL,
+  payment_method TEXT NOT NULL,
+  cashier_name TEXT NOT NULL,
+  items_json TEXT NOT NULL,
+  type TEXT DEFAULT 'sale',
+  created_at TEXT NOT NULL,
+  is_offline INTEGER DEFAULT 0
 )
 ''');
   }
@@ -251,6 +282,68 @@ CREATE TABLE offline_queue (
     final count = Sqflite.firstIntValue(
         await db.rawQuery('SELECT COUNT(*) FROM products WHERE currentStock <= minThreshold'));
     return count ?? 0;
+  }
+
+  Future<void> insertLocalTransaction({
+    required String id,
+    required String receiptNumber,
+    required double totalAmount,
+    required String paymentMethod,
+    required String cashierName,
+    required String itemsJson,
+    String type = 'sale',
+    required DateTime createdAt,
+    required bool isOffline,
+  }) async {
+    final db = await instance.database;
+    await db.insert(
+      'transactions',
+      {
+        'id': id,
+        'receipt_number': receiptNumber,
+        'total_amount': totalAmount,
+        'payment_method': paymentMethod,
+        'cashier_name': cashierName,
+        'items_json': itemsJson,
+        'type': type,
+        'created_at': createdAt.toIso8601String(),
+        'is_offline': isOffline ? 1 : 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    // Limit table size to 500 records
+    try {
+      await db.execute('''
+        DELETE FROM transactions WHERE id NOT IN (
+          SELECT id FROM transactions ORDER BY created_at DESC LIMIT 500
+        )
+      ''');
+    } catch (_) {}
+  }
+
+  Future<List<Map<String, dynamic>>> getLocalTransactions({int limit = 30, int skip = 0}) async {
+    final db = await instance.database;
+    return await db.query(
+      'transactions',
+      orderBy: 'created_at DESC',
+      limit: limit,
+      offset: skip,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getOfflineTransactions() async {
+    final db = await instance.database;
+    return await db.query(
+      'transactions',
+      where: 'is_offline = 1',
+      orderBy: 'created_at DESC',
+    );
+  }
+
+  Future<void> clearAllTransactions() async {
+    final db = await instance.database;
+    await db.delete('transactions');
   }
 
   Future close() async {

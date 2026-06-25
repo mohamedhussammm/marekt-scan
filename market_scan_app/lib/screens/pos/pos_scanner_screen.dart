@@ -399,7 +399,14 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                             isCheckingOut = true;
                           });
                           try {
-                            final result = await scanner.checkout(paymentMethod);
+                            final result = await scanner.checkout(
+                              paymentMethod,
+                              onSaleCreated: (sale) {
+                                if (context.mounted) {
+                                  context.read<AppProvider>().addLocalSale(sale);
+                                }
+                              },
+                            );
                             if (!ctx.mounted) return;
                             Navigator.pop(ctx);
                             if (result['success'] == true) {
@@ -1087,19 +1094,25 @@ class _ScannerSectionState extends State<_ScannerSection> {
           child: Selector<ScanningController, bool>(
             selector: (_, s) => s.cartItems.isNotEmpty,
             builder: (context, hasItems, _) {
-              if (!hasItems) return const SizedBox.shrink();
-              return ElevatedButton.icon(
-                onPressed: () => context.read<ScanningController>().clearCart(),
-                icon: const Icon(Icons.delete_outline, size: 16),
-                label: const Text(
-                  'مسح السلة',
-                  style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black54,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              return AnimatedOpacity(
+                opacity: hasItems ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !hasItems,
+                  child: ElevatedButton.icon(
+                    onPressed: () => context.read<ScanningController>().clearCart(),
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: const Text(
+                      'مسح السلة',
+                      style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.black54,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                  ),
                 ),
               );
             },

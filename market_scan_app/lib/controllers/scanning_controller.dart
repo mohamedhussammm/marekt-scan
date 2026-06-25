@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
@@ -155,19 +156,27 @@ class ScanningController extends ChangeNotifier {
   }
 
   Future<bool> addNewProduct(Product product) async {
+    final offlineId = const Uuid().v4();
+    final payload = product.toJson();
+    payload['offline_id'] = offlineId;
+
     try {
-      final result = await _api.addProduct(product.toJson());
-      if (result) {
-        await _db.insertProduct(product);
-        unknownBarcode = null;
-        _addToCart(product);
-        notifyListeners();
-        return true;
+      // 1. Optimistically write to SQLite immediately to enable scanning & lookup
+      await _db.insertProduct(product);
+      _productCache[product.barcode] = product;
+      unknownBarcode = null;
+      _addToCart(product);
+      notifyListeners();
+
+      // 2. Call API, fallback to offline sync queue on failure or return value of false
+      final result = await _api.addProduct(payload).timeout(const Duration(seconds: 8));
+      if (!result) {
+        await _syncEngine.enqueue('add_product', payload);
       }
-      return false;
-    } catch (e) {
-      debugPrint('addNewProduct error: $e');
-      return false;
+      return true;
+    } catch (_) {
+      await _syncEngine.enqueue('add_product', payload);
+      return true;
     }
   }
 
@@ -177,26 +186,34 @@ class ScanningController extends ChangeNotifier {
     required double sellingPrice,
     required int currentStock,
   }) async {
+    final updated = product.copyWith(
+      costPrice: costPrice,
+      sellingPrice: sellingPrice,
+      stockQuantity: currentStock,
+      isRegistered: true,
+    );
+
+    final offlineId = const Uuid().v4();
+    final payload = updated.toJson();
+    payload['offline_id'] = offlineId;
+
     try {
-      final updated = product.copyWith(
-        costPrice: costPrice,
-        sellingPrice: sellingPrice,
-        stockQuantity: currentStock,
-        isRegistered: true,
-      );
-      final success = await _api.updateProduct(product.barcode, updated.toJson());
-      if (success) {
-        await _db.insertProduct(updated);
-        _productCache[product.barcode] = updated;
-        unregisteredProduct = null;
-        _addToCart(updated);
-        notifyListeners();
-        return true;
+      // 1. Optimistically write to SQLite immediately
+      await _db.insertProduct(updated);
+      _productCache[product.barcode] = updated;
+      unregisteredProduct = null;
+      _addToCart(updated);
+      notifyListeners();
+
+      // 2. Call API, fallback to offline sync queue
+      final success = await _api.updateProduct(product.barcode, payload).timeout(const Duration(seconds: 8));
+      if (!success) {
+        await _syncEngine.enqueue('update_product', payload);
       }
-      return false;
-    } catch (e) {
-      debugPrint('registerStoreProduct error: $e');
-      return false;
+      return true;
+    } catch (_) {
+      await _syncEngine.enqueue('update_product', payload);
+      return true;
     }
   }
 
@@ -234,24 +251,29 @@ class ScanningController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Map<String, dynamic>> checkout(String paymentMethod) async {
+  Future<Map<String, dynamic>> checkout(String paymentMethod, {void Function(Sale)? onSaleCreated}) async {
     if (cartItems.isEmpty) return {'success': false, 'error': 'Cart is empty'};
 
     final offlineId = const Uuid().v4();
+    final List<CartItem> clonedCart = List<CartItem>.from(cartItems);
+    final double finalTotalAmount = totalAmount; // Store total before clearing cart
+
+    final itemsPayload = cartItems
+        .map((i) {
+          return {
+            'barcodeId': i.product.barcode,
+            'name': i.product.name,
+            'qty': i.quantity,
+            'unitPrice': i.product.sellingPrice,
+            'lineTotal': i.product.sellingPrice * i.quantity,
+          };
+        })
+        .toList();
+
     final payload = {
       'offline_id': offlineId,
-      'items': cartItems
-          .map((i) {
-            return {
-              'barcodeId': i.product.barcode,
-              'name': i.product.name,
-              'qty': i.quantity,
-              'unitPrice': i.product.sellingPrice,
-              'lineTotal': i.product.sellingPrice * i.quantity,
-            };
-          })
-          .toList(),
-      'totalAmount': totalAmount,
+      'items': itemsPayload,
+      'totalAmount': finalTotalAmount,
       'paymentMethod': paymentMethod,
     };
 
@@ -262,13 +284,111 @@ class ScanningController extends ChangeNotifier {
       final result = await _api.checkout(payload).timeout(const Duration(seconds: 8));
       if (result['success'] == true) {
         result['isOffline'] = false;
+        
+        final realReceiptNumber = result['receiptNumber'] ?? result['transaction']?['receiptNumber'] ?? 'RCP-${DateTime.now().millisecondsSinceEpoch}';
+        final realCashierName = result['cashierName'] ?? result['transaction']?['cashierName'] ?? 'محمد';
+
+        // Save to SQLite local transactions table for offline receipt browsing
+        await _db.insertLocalTransaction(
+          id: offlineId,
+          receiptNumber: realReceiptNumber,
+          totalAmount: finalTotalAmount,
+          paymentMethod: paymentMethod,
+          cashierName: realCashierName,
+          itemsJson: jsonEncode(itemsPayload),
+          type: 'sale',
+          createdAt: DateTime.now(),
+          isOffline: false,
+        );
+
+        if (onSaleCreated != null) {
+          final sale = Sale(
+            id: offlineId,
+            receiptNumber: realReceiptNumber,
+            items: clonedCart,
+            subtotal: finalTotalAmount,
+            discount: 0,
+            tax: 0,
+            total: finalTotalAmount,
+            amountPaid: finalTotalAmount,
+            paymentMethod: paymentMethod,
+            createdAt: DateTime.now(),
+            type: 'sale',
+            cashierName: realCashierName,
+            isOffline: false,
+          );
+          onSaleCreated(sale);
+        }
+
         return result;
       } else {
         await _syncEngine.enqueue('checkout', payload);
+        await _db.insertLocalTransaction(
+          id: offlineId,
+          receiptNumber: 'INV-معلق',
+          totalAmount: finalTotalAmount,
+          paymentMethod: paymentMethod,
+          cashierName: 'أوفلاين',
+          itemsJson: jsonEncode(itemsPayload),
+          type: 'sale',
+          createdAt: DateTime.now(),
+          isOffline: true,
+        );
+
+        if (onSaleCreated != null) {
+          final sale = Sale(
+            id: offlineId,
+            receiptNumber: 'INV-معلق',
+            items: clonedCart,
+            subtotal: finalTotalAmount,
+            discount: 0,
+            tax: 0,
+            total: finalTotalAmount,
+            amountPaid: finalTotalAmount,
+            paymentMethod: paymentMethod,
+            createdAt: DateTime.now(),
+            type: 'sale',
+            cashierName: 'أوفلاين',
+            isOffline: true,
+          );
+          onSaleCreated(sale);
+        }
+
         return {'success': true, 'isOffline': true};
       }
     } catch (_) {
       await _syncEngine.enqueue('checkout', payload);
+      await _db.insertLocalTransaction(
+        id: offlineId,
+        receiptNumber: 'INV-معلق',
+        totalAmount: finalTotalAmount,
+        paymentMethod: paymentMethod,
+        cashierName: 'أوفلاين',
+        itemsJson: jsonEncode(itemsPayload),
+        type: 'sale',
+        createdAt: DateTime.now(),
+        isOffline: true,
+      );
+
+      if (onSaleCreated != null) {
+        final sale = Sale(
+          id: offlineId,
+          receiptNumber: 'INV-معلق',
+          items: clonedCart,
+          subtotal: finalTotalAmount,
+          discount: 0,
+          tax: 0,
+          total: finalTotalAmount,
+          amountPaid: finalTotalAmount,
+          paymentMethod: paymentMethod,
+          createdAt: DateTime.now(),
+          type: 'sale',
+          cashierName: 'أوفلاين',
+          isOffline: true,
+        );
+        onSaleCreated(sale);
+      }
+
       return {'success': true, 'isOffline': true};
     }
   }

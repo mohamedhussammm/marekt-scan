@@ -516,7 +516,7 @@ class ApiService {
       return [];
     } catch (e) {
       debugPrint('API Error (getTransactions): $e');
-      return [];
+      rethrow;
     }
   }
 

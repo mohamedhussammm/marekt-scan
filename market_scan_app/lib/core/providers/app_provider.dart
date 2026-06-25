@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../../services/api_service.dart';
@@ -147,14 +148,16 @@ class AppProvider extends ChangeNotifier {
           await ApiService.saveToken(result['token']);
         }
 
-        // Parallel load: settings, dashboard stats, active shift.
-        // Products are NO longer bulk-loaded here — the inventory screen
-        // fetches its own paginated data (Bug #4 fix: no 3200-item payload on login).
-        await Future.wait([
+        // Parallel load settings, dashboard stats, active shift in the background
+        // to prevent blocking the login completion flow (making the login response instant).
+        Future.wait([
           loadSettings(),
           loadDashboardStats(),
           loadActiveShift(),
-        ]);
+        ]).catchError((err) {
+          debugPrint('Background login loading error: $err');
+          return <void>[];
+        });
         
         // Force bind logged-in user profile attributes
         _storeName = userData['storeName'] ?? _storeName;
@@ -251,6 +254,7 @@ class AppProvider extends ChangeNotifier {
     _shiftHistory = [];
     ApiService.clearToken();
     _db.clearAllProducts(); // Clear SQLite cache to isolate data
+    _db.clearAllTransactions(); // Clear local transactions cache on logout for privacy/isolation
     _updateFilterCaches();
     notifyListeners();
   }
@@ -288,14 +292,12 @@ class AppProvider extends ChangeNotifier {
         _api.getWeeklyChart(),
         _api.getTopProducts(),
         _api.getSalesByCategory(),
-        _api.getTransactions(limit: 10),
       ]);
 
       final summary = results[0] as Map<String, dynamic>;
       final chart = results[1] as List<double>;
       final topProds = results[2] as List<dynamic>;
       final catAgg = results[3] as List<dynamic>;
-      final txsList = results[4] as List<dynamic>;
 
       if (summary['success'] == true) {
         _todaySalesTotal = double.tryParse(summary['todayRevenue'].toString()) ?? 0.0;
@@ -319,43 +321,115 @@ class AppProvider extends ChangeNotifier {
       _topProductsList = topProds;
       _categoriesAggregationList = catAgg;
 
-      _sales.clear();
-      for (final tx in txsList) {
-        try {
-          final List<dynamic> itemsData = tx['items'] ?? [];
-          final items = itemsData.map((it) {
-            final double price = (it['unitPrice'] ?? 0).toDouble();
-            final int qty = (it['qty'] ?? 1).toInt();
-            final prod = findByBarcode(it['barcodeId']) ?? Product(
-              id: it['barcodeId'],
-              barcode: it['barcodeId'],
-              name: it['name'],
-              category: 'عام',
-              costPrice: price * 0.7,
-              sellingPrice: price,
-              stockQuantity: 100,
-              minStockLevel: 10,
-            );
-            return CartItem(product: prod, quantity: qty);
-          }).toList();
+      // Fetch transactions separately so a failure here doesn't crash the other dashboard cards
+      try {
+        final List<Sale> tempSales = [];
 
-          _sales.add(Sale(
-            id: tx['_id'],
-            receiptNumber: tx['receiptNumber'] ?? 'REC-000',
-            items: items,
-            subtotal: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
-            discount: 0,
-            tax: 0,
-            total: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
-            amountPaid: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
-            paymentMethod: tx['paymentMethod'] ?? 'نقداً',
-            createdAt: DateTime.parse(tx['createdAt']),
-            type: tx['type'] ?? 'sale',
-            cashierName: tx['cashierName'],
-          ));
-        } catch (err) {
-          debugPrint("Error mapping sale: $err");
+        // 1. First, load offline transactions from the local database
+        final localTxList = await _db.getLocalTransactions(limit: 10, skip: 0);
+        for (final tx in localTxList) {
+          if (tx['is_offline'] == 1) {
+            try {
+              final List<dynamic> itemsData = jsonDecode(tx['items_json'] as String);
+              final items = itemsData.map((it) {
+                final double price = (it['unitPrice'] ?? 0.0).toDouble();
+                final int qty = (it['qty'] ?? 1).toInt();
+                return CartItem(
+                  product: findByBarcode(it['barcodeId']) ?? Product(
+                    id: it['barcodeId'] ?? 'item',
+                    barcode: it['barcodeId'] ?? 'item',
+                    name: it['name'] ?? '',
+                    category: 'عام',
+                    costPrice: price * 0.7,
+                    sellingPrice: price,
+                    stockQuantity: 100,
+                    minStockLevel: 10,
+                  ),
+                  quantity: qty,
+                );
+              }).toList();
+
+              tempSales.add(Sale(
+                id: tx['id'],
+                receiptNumber: tx['receipt_number'] ?? 'INV-معلق',
+                items: items,
+                subtotal: (tx['total_amount'] ?? 0.0).toDouble(),
+                discount: 0,
+                tax: 0,
+                total: (tx['total_amount'] ?? 0.0).toDouble(),
+                amountPaid: (tx['total_amount'] ?? 0.0).toDouble(),
+                paymentMethod: tx['payment_method'] ?? 'نقداً',
+                createdAt: DateTime.parse(tx['created_at']),
+                type: tx['type'] ?? 'sale',
+                cashierName: tx['cashier_name'] ?? 'أوفلاين',
+                isOffline: true,
+              ));
+            } catch (_) {}
+          }
         }
+
+        // 2. Fetch server transactions and merge them (skipping duplicates)
+        final txsList = await _api.getTransactions(limit: 10).timeout(const Duration(seconds: 8));
+        for (final tx in txsList) {
+          try {
+            final offlineId = tx['offline_id'] ?? tx['offlineId'];
+            if (offlineId != null && tempSales.any((s) => s.id == offlineId)) {
+              continue; // Skip duplicate offline sale
+            }
+            if (tempSales.any((s) => s.id == tx['_id'])) {
+              continue; // Skip duplicate ID
+            }
+
+            final List<dynamic> itemsData = tx['items'] ?? [];
+            final items = itemsData.map((it) {
+              final double price = (it['unitPrice'] ?? 0).toDouble();
+              final int qty = (it['qty'] ?? 1).toInt();
+              final prod = findByBarcode(it['barcodeId']) ?? Product(
+                id: it['barcodeId'],
+                barcode: it['barcodeId'],
+                name: it['name'],
+                category: 'عام',
+                costPrice: price * 0.7,
+                sellingPrice: price,
+                stockQuantity: 100,
+                minStockLevel: 10,
+              );
+              return CartItem(product: prod, quantity: qty);
+            }).toList();
+
+            tempSales.add(Sale(
+              id: tx['_id'],
+              receiptNumber: tx['receiptNumber'] ?? 'REC-000',
+              items: items,
+              subtotal: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
+              discount: 0,
+              tax: 0,
+              total: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
+              amountPaid: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
+              paymentMethod: tx['paymentMethod'] ?? 'نقداً',
+              createdAt: DateTime.parse(tx['createdAt']),
+              type: tx['type'] ?? 'sale',
+              cashierName: tx['cashierName'],
+            ));
+          } catch (err) {
+            debugPrint("Error mapping sale: $err");
+          }
+        }
+
+        // 3. Retain any optimistic sales currently in _sales that have not yet loaded from server/DB
+        for (final sale in _sales) {
+          if (!tempSales.any((s) => s.id == sale.id)) {
+            tempSales.add(sale);
+          }
+        }
+
+        // Sort by createdAt descending
+        tempSales.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        _sales.clear();
+        _sales.addAll(tempSales.take(10));
+      } catch (txError) {
+        debugPrint("Failed to fetch online transactions for dashboard, trying local cache: $txError");
+        await _loadSalesFromLocalCache();
       }
     } catch (e) {
       // Offline fallback: load count metrics from cached shared preferences or SQLite
@@ -367,10 +441,13 @@ class AppProvider extends ChangeNotifier {
         debugPrint('Failed to load offline counts: $dbErr');
       }
 
+      // Also fall back to local SQLite transactions cache for recent sales
+      await _loadSalesFromLocalCache();
+
       // Rethrow network-level errors only if requested, so callers (e.g. dashboard timer) can
       // detect offline state and apply backoff. Otherwise, swallow/log to prevent unhandled async crashes.
       final errStr = e.toString();
-      final isNetworkError = e is SocketException || errStr.contains('SocketException') || errStr.contains('Connection failed');
+      final isNetworkError = e is SocketException || errStr.contains('SocketException') || errStr.contains('Connection failed') || errStr.contains('timeout') || errStr.contains('TimeoutException');
       if (rethrowNetworkErrors && isNetworkError) {
         rethrow;
       }
@@ -378,6 +455,66 @@ class AppProvider extends ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  void addLocalSale(Sale sale) {
+    _sales.insert(0, sale);
+    if (_sales.length > 10) {
+      _sales.removeLast();
+    }
+    _totalOrdersCount++;
+    _todayOrdersCount++;
+    _todaySalesTotal += sale.total;
+    notifyListeners();
+  }
+
+  Future<void> _loadSalesFromLocalCache() async {
+    try {
+      final localTxList = await _db.getLocalTransactions(limit: 10, skip: 0);
+      final List<Sale> cachedSales = [];
+      for (final tx in localTxList) {
+        try {
+          final List<dynamic> itemsData = jsonDecode(tx['items_json'] as String);
+          final items = itemsData.map((it) {
+            final double price = (it['unitPrice'] ?? 0.0).toDouble();
+            final int qty = (it['qty'] ?? 1).toInt();
+            return CartItem(
+              product: findByBarcode(it['barcodeId']) ?? Product(
+                id: it['barcodeId'] ?? 'item',
+                barcode: it['barcodeId'] ?? 'item',
+                name: it['name'] ?? '',
+                category: 'عام',
+                costPrice: price * 0.7,
+                sellingPrice: price,
+                stockQuantity: 100,
+                minStockLevel: 10,
+              ),
+              quantity: qty,
+            );
+          }).toList();
+
+          cachedSales.add(Sale(
+            id: tx['id'],
+            receiptNumber: tx['receipt_number'],
+            items: items,
+            subtotal: (tx['total_amount'] ?? 0.0).toDouble(),
+            discount: 0,
+            tax: 0,
+            total: (tx['total_amount'] ?? 0.0).toDouble(),
+            amountPaid: (tx['total_amount'] ?? 0.0).toDouble(),
+            paymentMethod: tx['payment_method'] ?? 'نقداً',
+            createdAt: DateTime.parse(tx['created_at']),
+            type: tx['type'] ?? 'sale',
+            cashierName: tx['cashier_name'] ?? 'أوفلاين',
+            isOffline: tx['is_offline'] == 1,
+          ));
+        } catch (_) {}
+      }
+      _sales.clear();
+      _sales.addAll(cachedSales);
+    } catch (e) {
+      debugPrint('Failed to load sales from local cache: $e');
+    }
   }
 
   Future<void> loadSettings() async {

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'db_helper.dart';
@@ -15,6 +17,11 @@ class SyncEngine extends ChangeNotifier {
   int _pendingCount = 0;
   bool _isSyncing = false;
   Timer? _timer;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+
+  // Backoff retry handling variables
+  int _failureCount = 0;
+  DateTime? _lastFailureTime;
 
   int get pendingCount => _pendingCount;
   bool get isSyncing => _isSyncing;
@@ -33,8 +40,9 @@ class SyncEngine extends ChangeNotifier {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => flushQueue());
     
-    // Also listen to connectivity changes
-    _connectivity.onConnectivityChanged.listen((List<ConnectivityResult> results) {
+    // Also listen to connectivity changes, ensure we cancel existing first
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = _connectivity.onConnectivityChanged.listen((List<ConnectivityResult> results) {
       if (!results.contains(ConnectivityResult.none)) {
         flushQueue();
       }
@@ -43,11 +51,30 @@ class SyncEngine extends ChangeNotifier {
 
   void stopMonitoring() {
     _timer?.cancel();
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
   }
 
   Future<bool> isOnline() async {
-    final connectivityResult = await _connectivity.checkConnectivity();
-    return !connectivityResult.contains(ConnectivityResult.none);
+    try {
+      final connectivityResult = await _connectivity.checkConnectivity();
+      if (connectivityResult.contains(ConnectivityResult.none)) return false;
+      
+      final host = Uri.parse(ApiService.baseUrl).host;
+      if (host.isEmpty) return false;
+      
+      // Perform actual network lookups to verify real internet connectivity to Vercel
+      try {
+        final result = await InternetAddress.lookup(host).timeout(const Duration(seconds: 4));
+        return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+      } catch (_) {
+        // Fall back to true if connectivity is active but lookup fails/timeouts,
+        // allowing the actual HTTP requests to attempt connection.
+        return true;
+      }
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> enqueue(String operation, Map<String, dynamic> payload) async {
@@ -55,8 +82,8 @@ class SyncEngine extends ChangeNotifier {
     await _db.insertOfflineOp(offlineId, operation, payload);
     _pendingCount = await _db.getPendingCount();
     notifyListeners();
-    // Attempt immediate background sync if online
-    flushQueue();
+    // Schedule background flush asynchronously to avoid race conditions with count updates
+    Future.microtask(() => flushQueue());
   }
 
   Future<List<OfflineQueueItem>> getPendingOps() => _db.getPendingOps();
@@ -69,6 +96,14 @@ class SyncEngine extends ChangeNotifier {
 
   Future<void> flushQueue() async {
     if (_isSyncing) return;
+
+    // Apply exponential backoff check
+    if (_failureCount > 0 && _lastFailureTime != null) {
+      final backoffSeconds = (10 * (1 << (_failureCount - 1))).clamp(10, 300); // 10s, 20s, 40s, 80s, 160s, 300s
+      if (DateTime.now().difference(_lastFailureTime!) < Duration(seconds: backoffSeconds)) {
+        return;
+      }
+    }
     
     final ops = await _db.getPendingOps();
     if (ops.isEmpty) return;
@@ -90,25 +125,61 @@ class SyncEngine extends ChangeNotifier {
         }).toList()
       };
 
-      final result = await _api.syncBatch(payload);
+      // Set timeout on batch sync API call
+      final result = await _api.syncBatch(payload).timeout(const Duration(seconds: 15));
       
       if (result['success'] == true) {
         final synced = List<int>.from(result['synced'] ?? []);
         final failed = List<dynamic>.from(result['failed'] ?? []);
 
         for (final id in synced) {
+          // Resolve actual operation item to cache it locally if checkout
+          final matchedOp = ops.firstWhere((o) => o.id == id);
+          if (matchedOp.operation == 'checkout') {
+            await _cacheSyncedCheckout(matchedOp.payload, matchedOp.offlineId);
+          }
           await _db.deleteOfflineOp(id);
         }
         for (final failedOp in failed) {
           await _db.markOpFailed(failedOp['id'] as int, failedOp['retries'] as int);
         }
+
+        // Reset backoff count on successful sync response
+        _failureCount = 0;
+        _lastFailureTime = null;
+      } else {
+        _failureCount++;
+        _lastFailureTime = DateTime.now();
       }
     } catch (e) {
+      _failureCount++;
+      _lastFailureTime = DateTime.now();
       debugPrint('SyncEngine error: $e');
     } finally {
       _isSyncing = false;
       _pendingCount = await _db.getPendingCount();
       notifyListeners();
+    }
+  }
+
+  /// Helper to write offline enqueued items to SQLite transactions when successfully synced
+  Future<void> _cacheSyncedCheckout(Map<String, dynamic> payload, String id) async {
+    try {
+      final itemsData = payload['items'] as List<dynamic>;
+      final receiptNumber = payload['receiptNumber'] ?? 'INV-معلق';
+      await _db.insertLocalTransaction(
+        id: id,
+        receiptNumber: receiptNumber,
+        totalAmount: (payload['totalAmount'] ?? 0.0).toDouble(),
+        paymentMethod: payload['paymentMethod'] ?? 'نقداً',
+        cashierName: payload['cashierName'] ?? 'أوفلاين',
+        itemsJson: jsonEncode(itemsData),
+        type: 'sale',
+        createdAt: DateTime.now(),
+        isOffline: false,
+      );
+    } catch (e) {
+      debugPrint('Failed to cache synced checkout: $e');
     }
   }
 }

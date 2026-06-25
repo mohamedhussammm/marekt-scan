@@ -3,6 +3,7 @@ const Product = require('../models/Product');
 const StoreInventory = require('../models/StoreInventory');
 const Transaction = require('../models/Transaction');
 const Shift = require('../models/Shift');
+const Settings = require('../models/Settings');
 
 exports.createTransaction = async (req, res) => {
   try {
@@ -51,8 +52,15 @@ exports.createTransaction = async (req, res) => {
       calculatedTotal += lineTotal;
     }
 
-    // Check overall total amount integrity (allow small rounding tolerance)
-    if (Math.abs(totalAmount - calculatedTotal) > 0.5) {
+    // Check overall total amount integrity (allow both tax-inclusive and tax-exclusive totals)
+    const settings = await Settings.findOne({ storeName: req.storeName });
+    const taxRate = settings ? (settings.taxRate ?? 14) : 14;
+    const expectedTaxInclusive = calculatedTotal * (1 + taxRate / 100);
+
+    const diffExclusive = Math.abs(totalAmount - calculatedTotal);
+    const diffInclusive = Math.abs(totalAmount - expectedTaxInclusive);
+
+    if (diffExclusive > 0.5 && diffInclusive > 0.5) {
       return res.status(400).json({ success: false, error: 'المبلغ الإجمالي للمعاملة لا يطابق مجموع بنود البيع' });
     }
     // ── END INPUT VALIDATION ──────────────────────────────────────────────
@@ -78,7 +86,7 @@ exports.createTransaction = async (req, res) => {
       return res.status(400).json({ success: false, error: 'الرجاء فتح الوردية أولاً قبل إتمام عملية البيع' });
     }
 
-    // 1. Verify all products exist and have sufficient stock in this store's inventory
+    // 1. Verify all products exist and ensure they have StoreInventory records
     for (const item of items) {
       const product = await Product.findOne({ barcodeId: item.barcodeId });
       if (!product) {
@@ -87,11 +95,15 @@ exports.createTransaction = async (req, res) => {
       
       const inventory = await StoreInventory.findOne({ storeName: req.storeName, barcodeId: item.barcodeId });
       if (!inventory) {
-        return res.status(400).json({ success: false, error: `المنتج غير مسجل في مخزون هذا المتجر: ${product.name}` });
-      }
-      
-      if (inventory.currentStock < item.qty) {
-        return res.status(400).json({ success: false, error: `الكمية غير كافية في مخزون هذا المتجر للمنتج: ${product.name}` });
+        // Dynamically create StoreInventory record using global product details
+        await StoreInventory.create({
+          storeName: req.storeName,
+          barcodeId: item.barcodeId,
+          sellingPrice: product.sellingPrice || 0,
+          costPrice: product.costPrice || 0,
+          currentStock: 0,
+          minThreshold: 10
+        });
       }
     }
     

@@ -17,6 +17,7 @@ router.get('/', async (req, res) => {
       {
         $project: {
           _id: 1,
+          offline_id: 1,
           receiptNumber: 1,
           totalAmount: 1,
           paymentMethod: 1,
@@ -34,6 +35,7 @@ router.get('/', async (req, res) => {
             {
               $project: {
                 _id: 1,
+                offline_id: 1,
                 receiptNumber: { $concat: ["EXP-", { $substrCP: [{ $toString: "$_id" }, 18, 6] }] },
                 totalAmount: "$amount",
                 paymentMethod: { $literal: 'نقداً' },

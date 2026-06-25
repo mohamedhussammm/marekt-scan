@@ -74,7 +74,7 @@ class _LoginScreenState extends State<LoginScreen>
     // Success controller: zoom-in checkmark, fade-out whole screen
     _successCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 400),
     );
     _successScale = Tween<double>(begin: 0.3, end: 1.0).animate(
       CurvedAnimation(parent: _successCtrl, curve: Curves.elasticOut),
@@ -116,7 +116,6 @@ class _LoginScreenState extends State<LoginScreen>
         _loginSuccess = true;
       });
       await _successCtrl.forward();
-      await Future.delayed(const Duration(milliseconds: 200));
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/home');
     } else {

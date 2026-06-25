@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -33,6 +34,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   String? _error;
   Timer? _debounce;
   String _selectedType = 'الكل'; // 'الكل' | 'المبيعات' | 'المصروفات'
+  bool _isFromCache = false;
 
   @override
   void initState() {
@@ -74,52 +76,49 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     try {
       // 1. Load offline pending transactions and expenses
       final db = DatabaseHelper.instance;
-      final pendingOps = await db.getPendingOps();
+      final offlineSales = await db.getOfflineTransactions();
       final pendingExpenses = await db.getOfflineExpenses();
 
       final List<dynamic> localPending = [];
 
-      // Map pending sales
-      for (final op in pendingOps) {
-        if (op.operation == 'checkout') {
-          try {
-            final payload = op.payload;
-            final List<dynamic> itemsData = payload['items'] ?? [];
-            final items = itemsData.map((it) {
-              final double price = (it['unitPrice'] ?? 0).toDouble();
-              final int qty = (it['qty'] ?? 1).toInt();
-              return CartItem(
-                product: Product(
-                  id: it['barcodeId'],
-                  barcode: it['barcodeId'],
-                  name: it['name'],
-                  category: 'عام',
-                  costPrice: price * 0.7,
-                  sellingPrice: price,
-                  stockQuantity: 100,
-                  minStockLevel: 10,
-                ),
-                quantity: qty,
-              );
-            }).toList();
+      // Map offline sales
+      for (final tx in offlineSales) {
+        try {
+          final List<dynamic> itemsData = jsonDecode(tx['items_json'] as String);
+          final items = itemsData.map((it) {
+            final double price = (it['unitPrice'] ?? 0.0).toDouble();
+            final int qty = (it['qty'] ?? 1).toInt();
+            return CartItem(
+              product: Product(
+                id: it['barcodeId'] ?? 'item',
+                barcode: it['barcodeId'] ?? 'item',
+                name: it['name'] ?? '',
+                category: 'عام',
+                costPrice: price * 0.7,
+                sellingPrice: price,
+                stockQuantity: 100,
+                minStockLevel: 10,
+              ),
+              quantity: qty,
+            );
+          }).toList();
 
-            localPending.add(Sale(
-              id: op.offlineId,
-              receiptNumber: 'INV-معلق',
-              items: items,
-              subtotal: (payload['totalAmount'] ?? 0.0).toDouble(),
-              discount: 0,
-              tax: 0,
-              total: (payload['totalAmount'] ?? 0.0).toDouble(),
-              amountPaid: (payload['totalAmount'] ?? 0.0).toDouble(),
-              paymentMethod: payload['paymentMethod'] ?? 'نقداً',
-              createdAt: op.createdAt,
-              isOffline: true,
-              type: 'sale',
-              cashierName: 'أوفلاين',
-            ));
-          } catch (_) {}
-        }
+          localPending.add(Sale(
+            id: tx['id'],
+            receiptNumber: tx['receipt_number'] ?? 'INV-معلق',
+            items: items,
+            subtotal: (tx['total_amount'] ?? 0.0).toDouble(),
+            discount: 0,
+            tax: 0,
+            total: (tx['total_amount'] ?? 0.0).toDouble(),
+            amountPaid: (tx['total_amount'] ?? 0.0).toDouble(),
+            paymentMethod: tx['payment_method'] ?? 'نقداً',
+            createdAt: DateTime.parse(tx['created_at']),
+            isOffline: true,
+            type: 'sale',
+            cashierName: tx['cashier_name'] ?? 'أوفلاين',
+          ));
+        } catch (_) {}
       }
 
       // Map pending expenses
@@ -159,6 +158,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       localPending.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
       // 2. Fetch first page from API
+      if (!mounted) return;
       final api = context.read<AppProvider>().api;
       final skip = 0;
       final serverList = await api.getTransactions(limit: _pageSize, skip: skip);
@@ -167,6 +167,14 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       for (final tx in serverList) {
         try {
           final isExp = tx['type'] == 'expense';
+          
+          // Deduplicate: If this transaction has synced, remove its offline pending version
+          final offlineId = tx['offline_id'] ?? tx['offlineId'];
+          if (offlineId != null) {
+            localPending.removeWhere((s) => s.id == offlineId);
+          }
+          localPending.removeWhere((s) => s.id == tx['_id']);
+
           final List<dynamic> itemsData = tx['items'] ?? [];
           final items = itemsData.map((it) {
             final double price = (it['unitPrice'] ?? 0.0).toDouble();
@@ -209,13 +217,69 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
         _transactions = mappedServer;
         _isInitialLoading = false;
         _hasMore = serverList.length >= _pageSize;
+        _isFromCache = false;
       });
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isInitialLoading = false;
-        _error = 'تعذر تحميل سجل المعاملات. تأكد من اتصالك بالشبكة.';
-      });
+      // ── OFFLINE FALLBACK: load from local transactions SQLite table ────────────────────────
+      try {
+        final db = DatabaseHelper.instance;
+        final localTxList = await db.getLocalTransactions(limit: _pageSize, skip: 0);
+        final List<dynamic> mappedLocal = [];
+
+        for (final tx in localTxList) {
+          try {
+            final List<dynamic> itemsData = jsonDecode(tx['items_json'] as String);
+            final items = itemsData.map((it) {
+              final double price = (it['unitPrice'] ?? 0.0).toDouble();
+              final int qty = (it['qty'] ?? 1).toInt();
+              return CartItem(
+                product: Product(
+                  id: it['barcodeId'] ?? 'item',
+                  barcode: it['barcodeId'] ?? 'item',
+                  name: it['name'] ?? '',
+                  category: 'عام',
+                  costPrice: price * 0.7,
+                  sellingPrice: price,
+                  stockQuantity: 100,
+                  minStockLevel: 10,
+                ),
+                quantity: qty,
+              );
+            }).toList();
+
+            mappedLocal.add(Sale(
+              id: tx['id'],
+              receiptNumber: tx['receipt_number'],
+              items: items,
+              subtotal: (tx['total_amount'] ?? 0.0).toDouble(),
+              discount: 0,
+              tax: 0,
+              total: (tx['total_amount'] ?? 0.0).toDouble(),
+              amountPaid: (tx['total_amount'] ?? 0.0).toDouble(),
+              paymentMethod: tx['payment_method'] ?? 'نقداً',
+              createdAt: DateTime.parse(tx['created_at']),
+              type: tx['type'] ?? 'sale',
+              cashierName: tx['cashier_name'] ?? 'أوفلاين',
+              isOffline: tx['is_offline'] == 1,
+            ));
+          } catch (_) {}
+        }
+
+        if (!mounted) return;
+        setState(() {
+          _transactions = mappedLocal;
+          _isInitialLoading = false;
+          _hasMore = localTxList.length >= _pageSize;
+          _isFromCache = true;
+          _error = null;
+        });
+      } catch (err) {
+        if (!mounted) return;
+        setState(() {
+          _isInitialLoading = false;
+          _error = 'تعذر تحميل سجل المعاملات. تأكد من اتصالك بالشبكة.';
+        });
+      }
     }
   }
 
@@ -224,6 +288,61 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     setState(() => _isLoadingMore = true);
 
     try {
+      if (_isFromCache) {
+        // Load more from SQLite local transactions table
+        final db = DatabaseHelper.instance;
+        final skip = _transactions.length;
+        final localTxList = await db.getLocalTransactions(limit: _pageSize, skip: skip);
+        final List<dynamic> mappedLocal = [];
+
+        for (final tx in localTxList) {
+          try {
+            final List<dynamic> itemsData = jsonDecode(tx['items_json'] as String);
+            final items = itemsData.map((it) {
+              final double price = (it['unitPrice'] ?? 0.0).toDouble();
+              final int qty = (it['qty'] ?? 1).toInt();
+              return CartItem(
+                product: Product(
+                  id: it['barcodeId'] ?? 'item',
+                  barcode: it['barcodeId'] ?? 'item',
+                  name: it['name'] ?? '',
+                  category: 'عام',
+                  costPrice: price * 0.7,
+                  sellingPrice: price,
+                  stockQuantity: 100,
+                  minStockLevel: 10,
+                ),
+                quantity: qty,
+              );
+            }).toList();
+
+            mappedLocal.add(Sale(
+              id: tx['id'],
+              receiptNumber: tx['receipt_number'],
+              items: items,
+              subtotal: (tx['total_amount'] ?? 0.0).toDouble(),
+              discount: 0,
+              tax: 0,
+              total: (tx['total_amount'] ?? 0.0).toDouble(),
+              amountPaid: (tx['total_amount'] ?? 0.0).toDouble(),
+              paymentMethod: tx['payment_method'] ?? 'نقداً',
+              createdAt: DateTime.parse(tx['created_at']),
+              type: tx['type'] ?? 'sale',
+              cashierName: tx['cashier_name'] ?? 'أوفلاين',
+              isOffline: tx['is_offline'] == 1,
+            ));
+          } catch (_) {}
+        }
+
+        if (!mounted) return;
+        setState(() {
+          _transactions.addAll(mappedLocal);
+          _isLoadingMore = false;
+          _hasMore = localTxList.length >= _pageSize;
+        });
+        return;
+      }
+
       final api = context.read<AppProvider>().api;
       final skip = _transactions.length;
       final serverList = await api.getTransactions(limit: _pageSize, skip: skip);
@@ -321,6 +440,29 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       ),
       body: Column(
         children: [
+          if (_isFromCache)
+            Container(
+              width: double.infinity,
+              color: Colors.orange.shade50,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_off_rounded, size: 16, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'عرض البيانات المحلية — غير متصل بالإنترنت',
+                      style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: Colors.orange),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _loadInitialData,
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(60, 28)),
+                    child: const Text('تحديث', style: TextStyle(fontFamily: 'Cairo', fontSize: 12, color: Colors.orange)),
+                  ),
+                ],
+              ),
+            ),
           // 1. Search Box
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
