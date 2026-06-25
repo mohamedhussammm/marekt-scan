@@ -6,11 +6,10 @@ import '../core/models/models.dart';
 import 'db_helper.dart';
 
 class ApiService {
-  // Support build-time overrides via --dart-define=API_URL=...
-  // Fallback: permanent ngrok tunnel (works from ANY network)
+  // Fallback: Vercel production deployment
   static const String _defaultBaseUrl = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'https://anytime-font-drainable.ngrok-free.dev/api',
+    defaultValue: 'https://marekt-scan.vercel.app/api',
   );
 
   // Runtime override — set via Settings screen, persisted in SharedPreferences
@@ -35,7 +34,7 @@ class ApiService {
       return null; // Corrupted
     }
 
-    // If it's a raw IP/domain (e.g. "192.168.1.22:3000" or "anytime-font-drainable.ngrok-free.dev")
+    // If it's a raw IP/domain (e.g. "192.168.1.22:3000" or "marekt-scan.vercel.app")
     // Prepend http:// to make it a valid URI
     if (!cleaned.contains('/')) {
       return 'http://$cleaned';
@@ -113,7 +112,6 @@ class ApiService {
     final headers = {
       'Connection': 'keep-alive',
       'Accept': 'application/json',
-      'ngrok-skip-browser-warning': 'true',
     };
     if (_authToken != null) {
       headers['Authorization'] = 'Bearer $_authToken';

@@ -49,8 +49,8 @@ class SyncEngine extends ChangeNotifier {
     final connectivityResult = await _connectivity.checkConnectivity();
     // Any connectivity other than 'none' means we have a network interface.
     // The actual batch request will fail fast (within 8s timeout) if the
-    // server itself is unreachable, which is safer than probing ngrok URLs
-    // that may have expired.
+    // server itself is unreachable, which is safer than probing Vercel URLs
+    // that may have cold starts.
     return !connectivityResult.contains(ConnectivityResult.none);
   }
 

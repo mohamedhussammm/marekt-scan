@@ -311,7 +311,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 controller: ctrl,
                 decoration: const InputDecoration(
                   labelText: 'رابط جديد (اختياري)',
-                  hintText: 'https://xxxx.ngrok-free.dev/api',
+                  hintText: 'https://xxxx.vercel.app/api',
                   helperText: 'اتركه فارغاً للرجوع للافتراضي',
                 ),
               ),
@@ -329,7 +329,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Navigator.pop(ctx);
                   setState(() {});
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('تم الرجوع للرابط الافتراضي (ngrok)')),
+                    const SnackBar(content: Text('تم الرجوع للرابط الافتراضي (Vercel)')),
                   );
                   provider.loadDashboardStats();
                 }

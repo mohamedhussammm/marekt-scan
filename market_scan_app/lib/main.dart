@@ -22,7 +22,7 @@ import 'services/sync_engine.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ApiService.initServerIp(); // Load saved API URL (or use ngrok default)
+  await ApiService.initServerIp(); // Load saved API URL (or use Vercel default)
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
