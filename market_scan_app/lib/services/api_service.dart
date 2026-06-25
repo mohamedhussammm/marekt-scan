@@ -1,13 +1,17 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/models/models.dart';
 import 'db_helper.dart';
 
 class ApiService {
-  // Default: permanent ngrok tunnel (works from ANY network)
-  static const String _defaultBaseUrl =
-      'https://anytime-font-drainable.ngrok-free.dev/api';
+  // Support build-time overrides via --dart-define=API_URL=...
+  // Fallback: permanent ngrok tunnel (works from ANY network)
+  static const String _defaultBaseUrl = String.fromEnvironment(
+    'API_URL',
+    defaultValue: 'https://anytime-font-drainable.ngrok-free.dev/api',
+  );
 
   // Runtime override — set via Settings screen, persisted in SharedPreferences
   static String _serverUrl = _defaultBaseUrl;
@@ -49,7 +53,7 @@ class ApiService {
     return null; // Invalid
   }
 
-  /// Call once at app startup to load any saved custom URL
+  /// Call once at app startup to load any saved custom URL and JWT token
   static Future<void> initServerIp() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('server_ip');
@@ -63,6 +67,7 @@ class ApiService {
         await prefs.remove('server_ip');
       }
     }
+    _authToken = prefs.getString('jwt_token');
   }
 
   /// Called from Settings screen when user saves a new URL
@@ -79,7 +84,7 @@ class ApiService {
     }
   }
 
-  /// Reset back to the default ngrok URL
+  /// Reset back to the default URL
   static Future<void> resetToDefault() async {
     _serverUrl = _defaultBaseUrl;
     final prefs = await SharedPreferences.getInstance();
@@ -88,9 +93,21 @@ class ApiService {
 
   // Blazing Fast Shared Persistent HTTP Connection Pool
   static final http.Client _client = http.Client();
-  static String? currentStoreName;
-  static String? currentUserRole;
-  static String? currentUsername;
+  static String? _authToken;
+
+  static String? get token => _authToken;
+
+  static Future<void> saveToken(String token) async {
+    _authToken = token;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('jwt_token', token);
+  }
+
+  static Future<void> clearToken() async {
+    _authToken = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('jwt_token');
+  }
 
   Map<String, String> _headers([bool withJson = false]) {
     final headers = {
@@ -98,14 +115,8 @@ class ApiService {
       'Accept': 'application/json',
       'ngrok-skip-browser-warning': 'true',
     };
-    if (currentStoreName != null) {
-      headers['x-store-name'] = Uri.encodeComponent(currentStoreName!);
-    }
-    if (currentUserRole != null) {
-      headers['x-user-role'] = currentUserRole!;
-    }
-    if (currentUsername != null) {
-      headers['x-username'] = Uri.encodeComponent(currentUsername!);
+    if (_authToken != null) {
+      headers['Authorization'] = 'Bearer $_authToken';
     }
     if (withJson) {
       headers['Content-Type'] = 'application/json';
@@ -125,7 +136,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (login): $e');
+      debugPrint('API Error (login): $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -151,7 +162,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (register): $e');
+      debugPrint('API Error (register): $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -165,7 +176,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (getActiveShift): $e');
+      debugPrint('API Error (getActiveShift): $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -179,7 +190,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (openShift): $e');
+      debugPrint('API Error (openShift): $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -193,7 +204,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (closeShift): $e');
+      debugPrint('API Error (closeShift): $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -206,7 +217,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (getShiftHistory): $e');
+      debugPrint('API Error (getShiftHistory): $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -225,7 +236,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (recordExpense): $e');
+      debugPrint('API Error (recordExpense): $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -247,7 +258,7 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      print('API Error (getExpenses): $e');
+      debugPrint('API Error (getExpenses): $e');
       return [];
     }
   }
@@ -265,7 +276,7 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      print('API Error (getExpenseCategorySummary): $e');
+      debugPrint('API Error (getExpenseCategorySummary): $e');
       return [];
     }
   }
@@ -282,7 +293,7 @@ class ApiService {
         }),
       );
     } catch (e) {
-      print('API Error (reportSecurityViolation): $e');
+      debugPrint('API Error (reportSecurityViolation): $e');
     }
   }
 
@@ -298,7 +309,7 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      print('API Error (getProductByBarcode): $e');
+      debugPrint('API Error (getProductByBarcode): $e');
       return null;
     }
   }
@@ -328,7 +339,7 @@ class ApiService {
       }
       return {'products': <Product>[], 'total': 0, 'hasMore': false};
     } catch (e) {
-      print('API Error (getLowStockProducts): $e');
+      debugPrint('API Error (getLowStockProducts): $e');
       rethrow; // Let the screen's catch block show the error state
     }
   }
@@ -404,7 +415,7 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      print('API Error (getAllProducts): $e');
+      debugPrint('API Error (getAllProducts): $e');
       return [];
     }
   }
@@ -419,7 +430,7 @@ class ApiService {
       );
       return response.statusCode == 201;
     } catch (e) {
-      print('API Error (addProduct): $e');
+      debugPrint('API Error (addProduct): $e');
       return false;
     }
   }
@@ -434,7 +445,7 @@ class ApiService {
       );
       return response.statusCode == 200;
     } catch (e) {
-      print('API Error (updateProduct): $e');
+      debugPrint('API Error (updateProduct): $e');
       return false;
     }
   }
@@ -447,7 +458,7 @@ class ApiService {
       );
       return response.statusCode == 200;
     } catch (e) {
-      print('API Error (deleteProduct): $e');
+      debugPrint('API Error (deleteProduct): $e');
       return false;
     }
   }
@@ -461,7 +472,7 @@ class ApiService {
       );
       return response.statusCode == 200;
     } catch (e) {
-      print('API Error (updateStock): $e');
+      debugPrint('API Error (updateStock): $e');
       return false;
     }
   }
@@ -475,7 +486,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (checkout): $e');
+      debugPrint('API Error (checkout): $e');
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -500,7 +511,7 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      print('API Error (getTransactions): $e');
+      debugPrint('API Error (getTransactions): $e');
       return [];
     }
   }
@@ -516,7 +527,7 @@ class ApiService {
       }
       return {'success': false};
     } catch (e) {
-      print('API Error (getDashboardSummary): $e');
+      debugPrint('API Error (getDashboardSummary): $e');
       return {'success': false};
     }
   }
@@ -536,7 +547,7 @@ class ApiService {
       }
       return List.filled(7, 0.0);
     } catch (e) {
-      print('API Error (getWeeklyChart): $e');
+      debugPrint('API Error (getWeeklyChart): $e');
       return List.filled(7, 0.0);
     }
   }
@@ -553,7 +564,7 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      print('API Error (getTopProducts): $e');
+      debugPrint('API Error (getTopProducts): $e');
       return [];
     }
   }
@@ -570,7 +581,7 @@ class ApiService {
       }
       return [];
     } catch (e) {
-      print('API Error (getSalesByCategory): $e');
+      debugPrint('API Error (getSalesByCategory): $e');
       return [];
     }
   }
@@ -587,7 +598,7 @@ class ApiService {
       }
       return {};
     } catch (e) {
-      print('API Error (getSettings): $e');
+      debugPrint('API Error (getSettings): $e');
       return {};
     }
   }
@@ -601,7 +612,7 @@ class ApiService {
       );
       return response.statusCode == 200;
     } catch (e) {
-      print('API Error (saveSettings): $e');
+      debugPrint('API Error (saveSettings): $e');
       return false;
     }
   }
@@ -614,7 +625,7 @@ class ApiService {
       );
       return json.decode(response.body);
     } catch (e) {
-      print('API Error (syncBatch): $e');
+      debugPrint('API Error (syncBatch): $e');
       return {'success': false, 'error': e.toString()};
     }
   }

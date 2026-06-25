@@ -705,7 +705,7 @@ class _BarcodeScannerSheetState extends State<BarcodeScannerSheet> {
           ),
           // Green static corner target overlay
           Center(
-            child: Container(
+            child: SizedBox(
               width: 240,
               height: 140,
               child: Stack(

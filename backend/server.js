@@ -20,42 +20,18 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Simplified Auth Middleware (checks for custom x-store-name context headers)
-app.use((req, res, next) => {
-  const storeHeader = req.headers['x-store-name'];
-  if (storeHeader) {
-    try {
-      req.storeName = decodeURIComponent(storeHeader);
-    } catch (e) {
-      req.storeName = storeHeader;
-    }
-  } else {
-    req.storeName = 'سوبر ماركت النيل'; // default fallback
-  }
+const { authenticateToken } = require('./middleware/jwt');
 
-  // Parse user role and username for audit logging and access control
-  req.userRole = req.headers['x-user-role'] || 'cashier';
-  
-  const userHeader = req.headers['x-username'];
-  if (userHeader) {
-    try {
-      req.username = decodeURIComponent(userHeader);
-    } catch (e) {
-      req.username = userHeader;
-    }
-  } else {
-    req.username = 'unknown';
-  }
-  
-  next();
-});
+app.use('/api/auth', authRoute);
+
+// Protect all other routes with JWT middleware
+app.use(authenticateToken);
 
 app.use('/api/products', productsRoute);
 app.use('/api/transactions', transactionsRoute);
 app.use('/api/suppliers', suppliersRoute);
 app.use('/api/reports', reportsRoute);
 app.use('/api/settings', settingsRoute);
-app.use('/api/auth', authRoute);
 app.use('/api/shifts', shiftsRoute);
 app.use('/api/expenses', expensesRoute);
 app.use('/api/logs', logsRoute);

@@ -33,7 +33,13 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider.value(value: SyncEngine.instance..startMonitoring()),
         ChangeNotifierProvider(create: (_) => AppProvider()),
-        ChangeNotifierProvider(create: (_) => ScanningController()),
+        ChangeNotifierProxyProvider<AppProvider, ScanningController>(
+          create: (_) => ScanningController(),
+          update: (_, appProvider, scanningController) {
+            scanningController?.updateTaxRate(appProvider.taxRate);
+            return scanningController ?? ScanningController();
+          },
+        ),
       ],
       child: const MarketScanApp(),
     ),

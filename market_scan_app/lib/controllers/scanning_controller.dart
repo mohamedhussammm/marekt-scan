@@ -8,7 +8,6 @@ import '../services/db_helper.dart';
 import '../services/api_service.dart';
 import '../services/sync_engine.dart';
 import 'package:uuid/uuid.dart';
-import 'dart:io';
 
 /// ScanningController — business logic for the POS barcode scanner.
 ///
@@ -47,14 +46,23 @@ class ScanningController extends ChangeNotifier {
 
   Future<void> _initVibrator() async {
     try {
-      _hasVibrator = await Vibration.hasVibrator() ?? false;
+      _hasVibrator = await Vibration.hasVibrator();
     } catch (_) {}
+  }
+
+  double _taxRate = 14.0;
+
+  void updateTaxRate(double newRate) {
+    if (_taxRate != newRate) {
+      _taxRate = newRate;
+      notifyListeners();
+    }
   }
 
   double get cartSubtotal =>
       cartItems.fold(0, (sum, item) => sum + (item.product.sellingPrice * item.quantity));
 
-  double get cartTax => cartSubtotal * 0.14;
+  double get cartTax => cartSubtotal * (_taxRate / 100);
 
   double get totalAmount => cartSubtotal + cartTax;
 
@@ -233,13 +241,15 @@ class ScanningController extends ChangeNotifier {
     final payload = {
       'offline_id': offlineId,
       'items': cartItems
-          .map((i) => {
-                'barcodeId': i.product.barcode,
-                'name': i.product.name,
-                'qty': i.quantity,
-                'unitPrice': i.product.sellingPrice,
-                'lineTotal': i.product.sellingPrice * i.quantity,
-              })
+          .map((i) {
+            return {
+              'barcodeId': i.product.barcode,
+              'name': i.product.name,
+              'qty': i.quantity,
+              'unitPrice': i.product.sellingPrice,
+              'lineTotal': i.product.sellingPrice * i.quantity,
+            };
+          })
           .toList(),
       'totalAmount': totalAmount,
       'paymentMethod': paymentMethod,

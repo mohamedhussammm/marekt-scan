@@ -6,12 +6,19 @@ const Shift = require('../models/Shift');
 // Create petty cash expense
 router.post('/', async (req, res) => {
   try {
-    console.log('--- POST /api/expenses called ---');
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
     const { amount, description, category } = req.body;
-    if (!amount || !description) {
-      return res.status(400).json({ success: false, error: 'المبلغ والوصف مطلوبان' });
+    
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'يجب أن يكون مبلغ المصروفات أكبر من صفر' });
+    }
+
+    if (!description || description.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'الوصف مطلوب' });
+    }
+
+    if (description.length > 200) {
+      return res.status(400).json({ success: false, error: 'الوصف طويل جداً (الحد الأقصى 200 حرف)' });
     }
 
     // Find active shift to link
@@ -24,8 +31,8 @@ router.post('/', async (req, res) => {
       storeName: req.storeName,
       cashierUsername: req.username || 'unknown',
       shiftId: activeShift ? activeShift._id : null,
-      amount: parseFloat(amount),
-      category: category || 'أخرى',
+      amount: parsedAmount,
+      category: (category || 'أخرى').substring(0, 50),
       description: description.trim()
     });
 

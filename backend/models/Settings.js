@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const settingsSchema = new mongoose.Schema({
-  storeName: { type: String, default: 'سوبر ماركت النيل' },
+  storeName: { type: String, required: true, unique: true, index: true },
   address: { type: String, default: 'القاهرة، مصر' },
   phone: { type: String, default: '+20 10 0000 0000' },
   email: { type: String, default: 'admin@marketscan.com' },

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -28,7 +27,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   List<dynamic> _transactions = []; // List of Sale / parsed transactions
   List<dynamic> _pendingTransactions = []; // Offline pending operations (Sales / Expenses)
   
-  int _currentPage = 1;
   bool _isInitialLoading = true;
   bool _isLoadingMore = false;
   bool _hasMore = true;
@@ -70,7 +68,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     setState(() {
       _isInitialLoading = true;
       _error = null;
-      _currentPage = 1;
       _hasMore = true;
     });
 
@@ -275,7 +272,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       setState(() {
         _transactions.addAll(mappedServer);
         _isLoadingMore = false;
-        _currentPage++;
         _hasMore = serverList.length >= _pageSize;
       });
     } catch (_) {

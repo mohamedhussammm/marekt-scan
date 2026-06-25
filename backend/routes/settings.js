@@ -17,15 +17,25 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Update Settings (updates settings scoped to the logged-in store)
 router.put('/', checkOwner, async (req, res) => {
   try {
+    const { address, phone, email, taxRate, currency, notifications, darkMode } = req.body;
+    
+    // Construct safe update object
+    const updatePayload = {};
+    if (address !== undefined) updatePayload.address = address;
+    if (phone !== undefined) updatePayload.phone = phone;
+    if (email !== undefined) updatePayload.email = email;
+    if (taxRate !== undefined) updatePayload.taxRate = Number(taxRate);
+    if (currency !== undefined) updatePayload.currency = currency;
+    if (notifications !== undefined) updatePayload.notifications = Boolean(notifications);
+    if (darkMode !== undefined) updatePayload.darkMode = Boolean(darkMode);
+
     let settings = await Settings.findOne({ storeName: req.storeName });
     if (!settings) {
-      // Merge req.body and force storeName
-      settings = new Settings({ ...req.body, storeName: req.storeName });
+      settings = new Settings({ ...updatePayload, storeName: req.storeName });
     } else {
-      Object.assign(settings, req.body);
+      Object.assign(settings, updatePayload);
       settings.storeName = req.storeName; // Enforce store context
     }
     await settings.save();

@@ -142,10 +142,10 @@ class AppProvider extends ChangeNotifier {
         _userRole = userData['role'] ?? 'cashier';
         _username = userData['username'] ?? '';
 
-        // Set store and user context for API client headers
-        ApiService.currentStoreName = _storeName;
-        ApiService.currentUserRole = _userRole;
-        ApiService.currentUsername = _username;
+        // Save JWT token
+        if (result['token'] != null) {
+          await ApiService.saveToken(result['token']);
+        }
 
         // Parallel load: settings, dashboard stats, active shift.
         // Products are NO longer bulk-loaded here — the inventory screen
@@ -204,10 +204,10 @@ class AppProvider extends ChangeNotifier {
         _userRole = userData['role'] ?? role;
         _username = userData['username'] ?? username;
 
-        // Set store and user context for API client headers
-        ApiService.currentStoreName = _storeName;
-        ApiService.currentUserRole = _userRole;
-        ApiService.currentUsername = _username;
+        // Save JWT token
+        if (result['token'] != null) {
+          await ApiService.saveToken(result['token']);
+        }
 
         // Parallel load: settings, dashboard stats, active shift.
         // Products are NO longer bulk-loaded here — the inventory screen
@@ -249,9 +249,7 @@ class AppProvider extends ChangeNotifier {
     _todayExpenses = 0.0;
     _cashOnHand = 0.0;
     _shiftHistory = [];
-    ApiService.currentStoreName = null;
-    ApiService.currentUserRole = null;
-    ApiService.currentUsername = null;
+    ApiService.clearToken();
     _db.clearAllProducts(); // Clear SQLite cache to isolate data
     _updateFilterCaches();
     notifyListeners();
@@ -356,7 +354,7 @@ class AppProvider extends ChangeNotifier {
             cashierName: tx['cashierName'],
           ));
         } catch (err) {
-          print("Error mapping sale: $err");
+          debugPrint("Error mapping sale: $err");
         }
       }
     } catch (e) {
@@ -477,15 +475,17 @@ class AppProvider extends ChangeNotifier {
   Future<Sale?> completeSale(String paymentMethod, double amountPaid) async {
     if (_cart.isEmpty) return null;
 
-    final receiptNumber = 'INV-${(_sales.length + 1).toString().padLeft(3, '0')}';
+    final receiptNumber = 'INV-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
     final offlineId = const Uuid().v4();
     
-    final itemsPayload = _cart.map((i) => {
-      'barcodeId': i.product.barcode,
-      'name': i.product.name,
-      'qty': i.quantity,
-      'unitPrice': i.product.sellingPrice,
-      'lineTotal': i.subtotal,
+    final itemsPayload = _cart.map((i) {
+      return {
+        'barcodeId': i.product.barcode,
+        'name': i.product.name,
+        'qty': i.quantity,
+        'unitPrice': i.product.sellingPrice,
+        'lineTotal': i.subtotal,
+      };
     }).toList();
 
     final payload = {
@@ -679,7 +679,7 @@ class AppProvider extends ChangeNotifier {
         _activeShift = null;
       }
     } catch (e) {
-      print("Error loading active shift: $e");
+      debugPrint("Error loading active shift: $e");
       _activeShift = null;
     }
     notifyListeners();
@@ -762,7 +762,7 @@ class AppProvider extends ChangeNotifier {
         _shiftHistory = list.map((x) => Shift.fromJson(x)).toList();
       }
     } catch (e) {
-      print("Error fetching shift history: $e");
+      debugPrint("Error fetching shift history: $e");
     }
     notifyListeners();
   }

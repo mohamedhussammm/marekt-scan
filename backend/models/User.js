@@ -6,18 +6,23 @@ const userSchema = new mongoose.Schema({
   email: { type: String, default: '' },
   passwordHash: { type: String, required: true },
   salt: { type: String, required: true },
+  iterations: { type: Number, required: true, default: 1000 },
   storeName: { type: String, default: 'سوبر ماركت النيل' },
   role: { type: String, default: 'cashier' }
 }, { timestamps: true });
 
+const NEW_ITERATIONS = 600000;
+
 // Helper to hash password using Node.js crypto (scrypt/pbkdf2)
 userSchema.methods.setPassword = function(password) {
   this.salt = crypto.randomBytes(16).toString('hex');
-  this.passwordHash = crypto.pbkdf2Sync(password, this.salt, 1000, 64, 'sha512').toString('hex');
+  this.iterations = NEW_ITERATIONS;
+  this.passwordHash = crypto.pbkdf2Sync(password, this.salt, NEW_ITERATIONS, 64, 'sha512').toString('hex');
 };
 
 userSchema.methods.validPassword = function(password) {
-  const hash = crypto.pbkdf2Sync(password, this.salt, 1000, 64, 'sha512').toString('hex');
+  const currentIterations = this.iterations || 1000;
+  const hash = crypto.pbkdf2Sync(password, this.salt, currentIterations, 64, 'sha512').toString('hex');
   return this.passwordHash === hash;
 };
 

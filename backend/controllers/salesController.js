@@ -8,6 +8,55 @@ exports.createTransaction = async (req, res) => {
   try {
     const { items, totalAmount, paymentMethod, offline_id } = req.body;
 
+    // ── INPUT VALIDATION ──────────────────────────────────────────────────
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, error: 'يجب أن تحتوي المعاملة على منتج واحد على الأقل' });
+    }
+
+    if (typeof totalAmount !== 'number' || totalAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'إجمالي مبلغ البيع غير صالح' });
+    }
+
+    const allowedPaymentMethods = ['نقداً', 'نقدا', 'بطاقة', 'تحويل', 'Visa', 'Mastercard', 'Cash', 'كاش', 'فيزا'];
+    if (!paymentMethod || !allowedPaymentMethods.includes(paymentMethod)) {
+      return res.status(400).json({ success: false, error: 'طريقة الدفع غير صالحة' });
+    }
+
+    let calculatedTotal = 0;
+    for (const item of items) {
+      if (!item || !item.barcodeId || !item.name) {
+        return res.status(400).json({ success: false, error: 'بيانات المنتج غير مكتملة في بنود الفاتورة' });
+      }
+      
+      const qty = Number(item.qty);
+      const unitPrice = Number(item.unitPrice);
+      const lineTotal = Number(item.lineTotal);
+
+      if (isNaN(qty) || qty <= 0) {
+        return res.status(400).json({ success: false, error: `الكمية غير صالحة للمنتج: ${item.name}` });
+      }
+      if (isNaN(unitPrice) || unitPrice < 0) {
+        return res.status(400).json({ success: false, error: `سعر المنتج غير صالح: ${item.name}` });
+      }
+      if (isNaN(lineTotal) || lineTotal < 0) {
+        return res.status(400).json({ success: false, error: `إجمالي السطر غير صالح للمنتج: ${item.name}` });
+      }
+
+      // Check line total integrity (allow small rounding difference for floating point math)
+      const expectedLineTotal = qty * unitPrice;
+      if (Math.abs(lineTotal - expectedLineTotal) > 0.05) {
+        return res.status(400).json({ success: false, error: `حساب إجمالي السطر خاطئ للمنتج: ${item.name}` });
+      }
+
+      calculatedTotal += lineTotal;
+    }
+
+    // Check overall total amount integrity (allow small rounding tolerance)
+    if (Math.abs(totalAmount - calculatedTotal) > 0.5) {
+      return res.status(400).json({ success: false, error: 'المبلغ الإجمالي للمعاملة لا يطابق مجموع بنود البيع' });
+    }
+    // ── END INPUT VALIDATION ──────────────────────────────────────────────
+
     // ── IDEMPOTENCY GUARD ────────────────────────────────────────────────
     if (offline_id) {
       const existing = await Transaction.findOne({ storeName: req.storeName, offline_id: offline_id });

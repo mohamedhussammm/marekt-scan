@@ -199,12 +199,15 @@ router.get('/', async (req, res) => {
     const search   = req.query.search   ? req.query.search.trim()   : '';
     const category = req.query.category ? req.query.category.trim() : '';
 
+    const escapeRegex = (string) => string.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+
     // Build MongoDB filter on the Product catalog
     const productFilter = {};
     if (search) {
+      const escapedSearch = escapeRegex(search);
       productFilter.$or = [
-        { name:      { $regex: search, $options: 'i' } },
-        { barcodeId: { $regex: search, $options: 'i' } },
+        { name:      { $regex: escapedSearch, $options: 'i' } },
+        { barcodeId: { $regex: escapedSearch, $options: 'i' } },
       ];
     }
     if (category) {

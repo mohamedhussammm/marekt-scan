@@ -126,7 +126,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                 children: [
               Text('إضافة منتج جديد', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 12),
-              Text('الباركود: ${barcode}', style: const TextStyle(color: AppColors.textSecondary)),
+              Text('الباركود: $barcode', style: const TextStyle(color: AppColors.textSecondary)),
               const SizedBox(height: 20),
               TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'اسم المنتج')),
               const SizedBox(height: 12),
@@ -158,9 +158,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: isSaving ? null : () async {
-                            print("ElevatedButton - Pressed! Name: '${nameCtrl.text}'");
                             if (nameCtrl.text.trim().isEmpty) {
-                              print("Validation failed: name is empty");
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('من فضلك أدخل اسم المنتج')));
                               return;

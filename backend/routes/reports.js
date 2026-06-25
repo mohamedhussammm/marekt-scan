@@ -35,14 +35,20 @@ router.get('/summary', async (req, res) => {
 
     // Total profit calculation scoped to this store
     let totalCost = 0;
-    const allTransactions = await Transaction.find({ storeName: req.storeName });
+    const allTransactions = await Transaction.find({ storeName: req.storeName }).lean();
     const totalRevenue = allTransactions.reduce((sum, t) => sum + t.totalAmount, 0);
+
+    // Fetch all store inventories to map cost prices and avoid N+1 database queries
+    const inventories = await StoreInventory.find({ storeName: req.storeName }).select('barcodeId costPrice').lean();
+    const costMap = {};
+    inventories.forEach(inv => {
+      costMap[inv.barcodeId] = inv.costPrice;
+    });
 
     for (const t of allTransactions) {
       for (const item of t.items) {
-        // Find product in this store's inventory to get costPrice
-        const inv = await StoreInventory.findOne({ storeName: req.storeName, barcodeId: item.barcodeId });
-        const cost = inv ? inv.costPrice : item.unitPrice * 0.7;
+        const costPrice = costMap[item.barcodeId];
+        const cost = costPrice !== undefined ? costPrice : item.unitPrice * 0.7;
         totalCost += cost * item.qty;
       }
     }
@@ -87,29 +93,34 @@ router.get('/summary', async (req, res) => {
   }
 });
 
-// Get Weekly Chart Data for this store
+// Get Weekly Chart Data for this store (Optimized to 1 Query)
 router.get('/weekly-chart', async (req, res) => {
   try {
     const chartData = [];
     const now = new Date();
+    
+    // Fetch last 7 days of transactions in a single query
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const transactions = await Transaction.find({
+      storeName: req.storeName,
+      createdAt: { $gte: sevenDaysAgo }
+    }).select('totalAmount createdAt').lean();
+
+    // Group in memory by local YYYY-MM-DD format
+    const dailySumMap = {};
+    for (const t of transactions) {
+      const dateStr = new Date(t.createdAt).toLocaleDateString('en-CA'); // "YYYY-MM-DD"
+      dailySumMap[dateStr] = (dailySumMap[dateStr] || 0) + t.totalAmount;
+    }
 
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(now.getDate() - i);
-      
-      const startOfDay = new Date(d);
-      startOfDay.setHours(0, 0, 0, 0);
-      
-      const endOfDay = new Date(d);
-      endOfDay.setHours(23, 59, 59, 999);
-
-      const txs = await Transaction.find({
-        storeName: req.storeName,
-        createdAt: { $gte: startOfDay, $lte: endOfDay }
-      });
-
-      const total = txs.reduce((sum, t) => sum + t.totalAmount, 0);
-      chartData.push(total);
+      const dateStr = d.toLocaleDateString('en-CA'); // "YYYY-MM-DD"
+      chartData.push(dailySumMap[dateStr] || 0);
     }
 
     res.json({ success: true, data: chartData });

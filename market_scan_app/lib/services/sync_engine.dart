@@ -10,6 +10,7 @@ class SyncEngine extends ChangeNotifier {
 
   final DatabaseHelper _db = DatabaseHelper.instance;
   final ApiService _api = ApiService();
+  final Connectivity _connectivity = Connectivity();
   
   int _pendingCount = 0;
   bool _isSyncing = false;
@@ -33,7 +34,7 @@ class SyncEngine extends ChangeNotifier {
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => flushQueue());
     
     // Also listen to connectivity changes
-    Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+    _connectivity.onConnectivityChanged.listen((List<ConnectivityResult> results) {
       if (!results.contains(ConnectivityResult.none)) {
         flushQueue();
       }
@@ -45,7 +46,7 @@ class SyncEngine extends ChangeNotifier {
   }
 
   Future<bool> isOnline() async {
-    final connectivityResult = await Connectivity().checkConnectivity();
+    final connectivityResult = await _connectivity.checkConnectivity();
     // Any connectivity other than 'none' means we have a network interface.
     // The actual batch request will fail fast (within 8s timeout) if the
     // server itself is unreachable, which is safer than probing ngrok URLs
@@ -81,11 +82,13 @@ class SyncEngine extends ChangeNotifier {
 
     try {
       final payload = {
-        'operations': ops.map((op) => {
-          'id': op.id,
-          'type': op.operation,
-          'payload': op.payload,
-          'retries': op.retries
+        'operations': ops.map((op) {
+          return {
+            'id': op.id,
+            'type': op.operation,
+            'payload': op.payload,
+            'retries': op.retries,
+          };
         }).toList()
       };
 

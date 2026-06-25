@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../middleware/jwt');
 
 // Register
 router.post('/register', async (req, res) => {
@@ -15,18 +17,46 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, error: 'اسم المستخدم مسجل بالفعل' });
     }
 
+    // Role Escalation Prevention:
+    // Check if any user already exists for this store name.
+    // If not, this user is the owner/admin. If yes, this user MUST be a cashier.
+    const normalizedStoreName = (storeName || 'سوبر ماركت النيل').trim();
+    const existingStoreUsers = await User.countDocuments({ storeName: normalizedStoreName });
+    
+    let assignedRole = 'cashier';
+    if (existingStoreUsers === 0) {
+      // First user of the store can be owner or admin
+      assignedRole = (role === 'admin' || role === 'owner') ? role : 'owner';
+    } else {
+      // Subsequent users of this store are strictly cashiers
+      assignedRole = 'cashier';
+    }
+
     const newUser = new User({
-      username,
+      username: username.trim(),
       email: email || '',
-      storeName: storeName || 'سوبر ماركت النيل',
-      role: role || 'cashier'
+      storeName: normalizedStoreName,
+      role: assignedRole
     });
     newUser.setPassword(password);
     await newUser.save();
 
+    // Generate JWT token on registration
+    const token = jwt.sign(
+      {
+        userId: newUser._id,
+        username: newUser.username,
+        storeName: newUser.storeName,
+        role: newUser.role
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     res.status(201).json({
       success: true,
       message: 'تم تسجيل المستخدم بنجاح',
+      token,
       user: {
         id: newUser._id,
         username: newUser.username,
@@ -47,31 +77,37 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ success: false, error: 'اسم المستخدم وكلمة المرور مطلوبان' });
     }
 
-    // Dynamic fallback: if database has zero users, auto-seed a default admin user
-    // Dynamic lookup by either username or email
-    let user = await User.findOne({
-      $or: [ { username: username }, { email: username } ]
+    // Lookup user by either username or email
+    const user = await User.findOne({
+      $or: [ { username: username.trim() }, { email: username.trim() } ]
     });
-
-    if (!user && (await User.countDocuments()) === 0 && username === 'admin') {
-      const newUser = new User({
-        username: 'admin',
-        email: 'admin@marketscan.com',
-        storeName: 'سوبر ماركت النيل',
-        role: 'admin'
-      });
-      newUser.setPassword('admin123');
-      await newUser.save();
-      user = newUser;
-    }
 
     if (!user || !user.validPassword(password)) {
       return res.status(400).json({ success: false, error: 'اسم المستخدم أو البريد الإلكتروني أو كلمة المرور غير صحيحة' });
     }
 
+    // Dynamic Hashing Migration: upgrade iterations if below threshold (600,000)
+    if (!user.iterations || user.iterations < 600000) {
+      user.setPassword(password);
+      await user.save();
+    }
+
+    // Generate JWT token on login
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        username: user.username,
+        storeName: user.storeName,
+        role: user.role
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     res.json({
       success: true,
       message: 'تم تسجيل الدخول بنجاح',
+      token,
       user: {
         id: user._id,
         username: user.username,
@@ -85,3 +121,4 @@ router.post('/login', async (req, res) => {
 });
 
 module.exports = router;
+
