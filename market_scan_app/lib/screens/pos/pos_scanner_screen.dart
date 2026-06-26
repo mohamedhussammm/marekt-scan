@@ -1090,31 +1090,7 @@ class _ScannerSectionState extends State<_ScannerSection> {
         const Center(
           child: _StaticScannerOverlay(),
         ),
-        Positioned(
-          top: 12,
-          left: 12,
-          width: 120,
-          child: Selector<ScanningController, bool>(
-            selector: (_, s) => s.cartItems.isNotEmpty,
-            builder: (context, hasItems, _) {
-              if (!hasItems) return const SizedBox.shrink();
-              return ElevatedButton.icon(
-                onPressed: () => context.read<ScanningController>().clearCart(),
-                icon: const Icon(Icons.delete_outline, size: 16),
-                label: const Text(
-                  'مسح السلة',
-                  style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black54,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-              );
-            },
-          ),
-        ),
+
         // Bug #7: torch driven by controller's ValueListenable — syncs with
         // real hardware state after backgrounding, incoming calls, OS resets.
         Positioned(
@@ -1282,7 +1258,7 @@ class _CartPanel extends StatelessWidget {
             ),
             if (cartItems.isNotEmpty)
               Container(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
                 decoration: BoxDecoration(
                   color: AppColors.glassCard,
                   border: const Border(
