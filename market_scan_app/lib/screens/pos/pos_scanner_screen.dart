@@ -613,7 +613,9 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                 // RepaintBoundary: isolates camera paint so cart scroll
                 // updates don't force the camera preview to repaint.
                 child: RepaintBoundary(
-                  child: _ScannerSection(onCheckout: (sc) => _showCheckoutDialog(context, sc)),
+                  child: (isCashier && activeShift == null)
+                      ? Container(color: Colors.black)
+                      : _ScannerSection(onCheckout: (sc) => _showCheckoutDialog(context, sc)),
                 ),
               ),
               // ── Cart panel (remaining space) ──────────────────────────────
@@ -1073,6 +1075,7 @@ class _ScannerSectionState extends State<_ScannerSection> {
 
         Positioned.fill(
           child: MobileScanner(
+            key: const ValueKey('pos_scanner_preview_view'),
             controller: _scannerController,
             onDetect: (capture) {
               final barcode = capture.barcodes.firstOrNull;
@@ -1087,32 +1090,25 @@ class _ScannerSectionState extends State<_ScannerSection> {
         const Center(
           child: _StaticScannerOverlay(),
         ),
-        // Top controls: Clear (left)
         Positioned(
           top: 12,
           left: 12,
           child: Selector<ScanningController, bool>(
             selector: (_, s) => s.cartItems.isNotEmpty,
             builder: (context, hasItems, _) {
-              return AnimatedOpacity(
-                opacity: hasItems ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: IgnorePointer(
-                  ignoring: !hasItems,
-                  child: ElevatedButton.icon(
-                    onPressed: () => context.read<ScanningController>().clearCart(),
-                    icon: const Icon(Icons.delete_outline, size: 16),
-                    label: const Text(
-                      'مسح السلة',
-                      style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black54,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    ),
-                  ),
+              if (!hasItems) return const SizedBox.shrink();
+              return ElevatedButton.icon(
+                onPressed: () => context.read<ScanningController>().clearCart(),
+                icon: const Icon(Icons.delete_outline, size: 16),
+                label: const Text(
+                  'مسح السلة',
+                  style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               );
             },
