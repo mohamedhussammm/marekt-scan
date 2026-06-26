@@ -52,15 +52,27 @@ router.get('/summary', async (req, res) => {
         totalCost += cost * item.qty;
       }
     }
-    const netProfit = totalRevenue - totalCost;
-
     // ─── SHIFT & PETTY CASH CALCULATIONS ───
-    // Today's petty cash expenses
-    const todayExpensesList = await Expense.find({
-      storeName: req.storeName,
-      createdAt: { $gte: today }
-    });
-    const todayExpenses = todayExpensesList.reduce((sum, e) => sum + e.amount, 0);
+    const allExpensesList = await Expense.find({ storeName: req.storeName }).lean();
+    const totalExpenses = allExpensesList.reduce((sum, e) => sum + e.amount, 0);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const weeklyExpenses = allExpensesList
+      .filter(e => new Date(e.createdAt) >= sevenDaysAgo)
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const todayExpenses = allExpensesList
+      .filter(e => new Date(e.createdAt) >= today)
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    let estimatedGrossProfit = totalRevenue - totalCost;
+    if (estimatedGrossProfit <= 0 && totalRevenue > 0) {
+      estimatedGrossProfit = totalRevenue * 0.22;
+    }
+    const netProfit = estimatedGrossProfit - totalExpenses;
 
     // Active shift starting cash
     const activeShift = await Shift.findOne({
@@ -83,9 +95,11 @@ router.get('/summary', async (req, res) => {
       totalProductsCount,
       lowStockCount,
       totalRevenue,
-      netProfit: netProfit > 0 ? netProfit : totalRevenue * 0.22, // fallback to 22% target margin if negative/no sales
+      netProfit,
       totalOrders: allTransactions.length,
       todayExpenses,
+      weeklyExpenses,
+      totalExpenses,
       cashOnHand
     });
   } catch (err) {

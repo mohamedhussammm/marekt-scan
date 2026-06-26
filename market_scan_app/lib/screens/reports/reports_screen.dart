@@ -101,9 +101,9 @@ class _ReportsScreenState extends State<ReportsScreen>
                   Expanded(
                     child: Selector<AppProvider, double>(
                       selector: (_, p) {
-                        if (_periodIndex == 0) return p.todaySalesTotal;
-                        if (_periodIndex == 1) return p.weeklySales.fold(0.0, (sum, val) => sum + val);
-                        return p.allTimeRevenue;
+                        if (_periodIndex == 0) return p.todaySalesTotal - p.todayExpenses;
+                        if (_periodIndex == 1) return p.weeklySales.fold(0.0, (sum, val) => sum + val) - p.weeklyExpenses;
+                        return p.allTimeRevenue - p.totalExpenses;
                       },
                       builder: (context, revenue, __) => _KpiCard(
                           title: AppStrings.totalRevenue,
@@ -116,8 +116,8 @@ class _ReportsScreenState extends State<ReportsScreen>
                   Expanded(
                     child: Selector<AppProvider, double>(
                       selector: (_, p) {
-                         if (_periodIndex == 0) return p.todaySalesTotal * 0.22;
-                         if (_periodIndex == 1) return p.weeklySales.fold(0.0, (sum, val) => sum + val) * 0.22;
+                         if (_periodIndex == 0) return (p.todaySalesTotal * 0.22) - p.todayExpenses;
+                         if (_periodIndex == 1) return (p.weeklySales.fold(0.0, (sum, val) => sum + val) * 0.22) - p.weeklyExpenses;
                          return p.netProfit;
                       },
                       builder: (context, profit, __) => _KpiCard(

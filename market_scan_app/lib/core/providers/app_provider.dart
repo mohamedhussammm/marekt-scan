@@ -61,6 +61,8 @@ class AppProvider extends ChangeNotifier {
   String _username = '';
   Shift? _activeShift;
   double _todayExpenses = 0.0;
+  double _weeklyExpenses = 0.0;
+  double _totalExpenses = 0.0;
   double _cashOnHand = 0.0;
   List<Shift> _shiftHistory = [];
 
@@ -124,6 +126,8 @@ class AppProvider extends ChangeNotifier {
   String get username => _username;
   Shift? get activeShift => _activeShift;
   double get todayExpenses => _todayExpenses;
+  double get weeklyExpenses => _weeklyExpenses;
+  double get totalExpenses => _totalExpenses;
   double get cashOnHand => _cashOnHand;
   List<Shift> get shiftHistory => _shiftHistory;
 
@@ -250,6 +254,8 @@ class AppProvider extends ChangeNotifier {
     _username = '';
     _activeShift = null;
     _todayExpenses = 0.0;
+    _weeklyExpenses = 0.0;
+    _totalExpenses = 0.0;
     _cashOnHand = 0.0;
     _shiftHistory = [];
     ApiService.clearToken();
@@ -308,6 +314,8 @@ class AppProvider extends ChangeNotifier {
         _lowStockCount = int.tryParse(summary['lowStockCount'].toString()) ?? 0;
         _totalProductsCount = int.tryParse(summary['totalProductsCount'].toString()) ?? 0;
         _todayExpenses = double.tryParse((summary['todayExpenses'] ?? 0).toString()) ?? 0.0;
+        _weeklyExpenses = double.tryParse((summary['weeklyExpenses'] ?? 0).toString()) ?? 0.0;
+        _totalExpenses = double.tryParse((summary['totalExpenses'] ?? 0).toString()) ?? 0.0;
         _cashOnHand = double.tryParse((summary['cashOnHand'] ?? 0).toString()) ?? 0.0;
 
         // Persist counts to shared_preferences for robust offline dashboard loading
