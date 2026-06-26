@@ -39,23 +39,10 @@ class _ReportsScreenState extends State<ReportsScreen>
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text(AppStrings.reportsTitle),
-        automaticallyImplyLeading: false,
-        actions: [
-          IconButton(
-            onPressed: () async {
-              ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('جاري تصدير التقرير...')));
-              final url = Uri.parse('${ApiService.baseUrl}/reports/monthly/csv');
-              if (await canLaunchUrl(url)) {
-                await launchUrl(url, mode: LaunchMode.externalApplication);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('حدث خطأ أثناء التصدير.')));
-              }
-            },
-            icon: const Icon(Icons.download_outlined, color: Colors.white),
-          ),
-        ],
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
       ),
       body: RefreshIndicator(
         onRefresh: () async {
@@ -94,10 +81,14 @@ class _ReportsScreenState extends State<ReportsScreen>
                 children: [
                   Expanded(
                     child: Selector<AppProvider, double>(
-                      selector: (_, p) => p.allTimeRevenue,
-                      builder: (context, allTimeRevenue, __) => _KpiCard(
+                      selector: (_, p) {
+                        if (_periodIndex == 0) return p.todaySalesTotal;
+                        if (_periodIndex == 1) return p.weeklySales.fold(0.0, (sum, val) => sum + val);
+                        return p.allTimeRevenue;
+                      },
+                      builder: (context, revenue, __) => _KpiCard(
                           title: AppStrings.totalRevenue,
-                          value: '${allTimeRevenue.toStringAsFixed(0)} ${AppStrings.currencySymbol}',
+                          value: '${revenue.toStringAsFixed(0)} ${AppStrings.currencySymbol}',
                           icon: Icons.trending_up,
                           color: AppColors.primary),
                     ),
@@ -105,10 +96,14 @@ class _ReportsScreenState extends State<ReportsScreen>
                   const SizedBox(width: 12),
                   Expanded(
                     child: Selector<AppProvider, double>(
-                      selector: (_, p) => p.netProfit,
-                      builder: (context, netProfit, __) => _KpiCard(
+                      selector: (_, p) {
+                         if (_periodIndex == 0) return p.todaySalesTotal * 0.22;
+                         if (_periodIndex == 1) return p.weeklySales.fold(0.0, (sum, val) => sum + val) * 0.22;
+                         return p.netProfit;
+                      },
+                      builder: (context, profit, __) => _KpiCard(
                           title: AppStrings.netProfit,
-                          value: '${netProfit.toStringAsFixed(0)} ${AppStrings.currencySymbol}',
+                          value: '${profit.toStringAsFixed(0)} ${AppStrings.currencySymbol}',
                           icon: Icons.account_balance_wallet_outlined,
                           color: AppColors.success),
                     ),
@@ -120,10 +115,17 @@ class _ReportsScreenState extends State<ReportsScreen>
                 children: [
                   Expanded(
                     child: Selector<AppProvider, int>(
-                      selector: (_, p) => p.totalOrdersCount,
-                      builder: (context, totalOrdersCount, __) => _KpiCard(
+                      selector: (_, p) {
+                         if (_periodIndex == 0) return p.todayOrdersCount;
+                         if (_periodIndex == 1) {
+                            final weekAgo = DateTime.now().subtract(const Duration(days: 7));
+                            return p.sales.where((s) => s.createdAt.isAfter(weekAgo)).length;
+                         }
+                         return p.totalOrdersCount;
+                      },
+                      builder: (context, orders, __) => _KpiCard(
                           title: AppStrings.totalOrders,
-                          value: '$totalOrdersCount',
+                          value: '$orders',
                           icon: Icons.receipt_long_outlined,
                           color: AppColors.info),
                     ),
@@ -131,7 +133,22 @@ class _ReportsScreenState extends State<ReportsScreen>
                   const SizedBox(width: 12),
                   Expanded(
                     child: Selector<AppProvider, List<dynamic>>(
-                      selector: (_, p) => [p.allTimeRevenue, p.totalOrdersCount],
+                      selector: (_, p) {
+                        double rev = 0;
+                        int cnt = 0;
+                        if (_periodIndex == 0) {
+                          rev = p.todaySalesTotal;
+                          cnt = p.todayOrdersCount;
+                        } else if (_periodIndex == 1) {
+                          rev = p.weeklySales.fold(0.0, (sum, val) => sum + val);
+                          final weekAgo = DateTime.now().subtract(const Duration(days: 7));
+                          cnt = p.sales.where((s) => s.createdAt.isAfter(weekAgo)).length;
+                        } else {
+                          rev = p.allTimeRevenue;
+                          cnt = p.totalOrdersCount;
+                        }
+                        return [rev, cnt];
+                      },
                       builder: (context, data, __) {
                         final double rev = data[0];
                         final int cnt = data[1];
