@@ -658,7 +658,7 @@ class _GlassTransactionTile extends StatelessWidget {
                     Text(
                       isExpense
                           ? 'مصروفات: ${sale.items.isNotEmpty ? sale.items.first.product.name : "-"}'
-                          : '${sale.items.length} منتجات • ${sale.paymentMethod}',
+                          : '${sale.items.length} منتجات • ${sale.paymentMethod}${sale.cashierName != null && sale.cashierName!.isNotEmpty ? " • بواسطة: ${sale.cashierName}" : ""}',
                       maxLines: 1, overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: isExpense
