@@ -373,11 +373,43 @@ class AppProvider extends ChangeNotifier {
         for (final tx in txsList) {
           try {
             final offlineId = tx['offline_id'] ?? tx['offlineId'];
-            if (offlineId != null && tempSales.any((s) => s.id == offlineId)) {
-              continue; // Skip duplicate offline sale
-            }
-            if (tempSales.any((s) => s.id == tx['_id'])) {
-              continue; // Skip duplicate ID
+            
+            // Remove any pending local/offline transaction in tempSales that matches this server transaction
+            tempSales.removeWhere((s) {
+              if (s.id == tx['_id']) {
+                return true;
+              }
+              if (offlineId != null && s.id == offlineId) {
+                return true;
+              }
+              if (tx['receiptNumber'] != null &&
+                  tx['receiptNumber'] != 'INV-معلق' &&
+                  tx['receiptNumber'] != 'REC-000' &&
+                  s.receiptNumber == tx['receiptNumber']) {
+                return true;
+              }
+              return false;
+            });
+
+            // Skip if it's already in tempSales (double-guard)
+            final isDuplicate = tempSales.any((s) {
+              if (s.id == tx['_id']) {
+                return true;
+              }
+              if (offlineId != null && s.id == offlineId) {
+                return true;
+              }
+              if (tx['receiptNumber'] != null &&
+                  tx['receiptNumber'] != 'INV-معلق' &&
+                  tx['receiptNumber'] != 'REC-000' &&
+                  s.receiptNumber == tx['receiptNumber']) {
+                return true;
+              }
+              return false;
+            });
+
+            if (isDuplicate) {
+              continue;
             }
 
             final List<dynamic> itemsData = tx['items'] ?? [];
@@ -398,7 +430,7 @@ class AppProvider extends ChangeNotifier {
             }).toList();
 
             tempSales.add(Sale(
-              id: tx['_id'],
+              id: offlineId ?? tx['_id'],
               receiptNumber: tx['receiptNumber'] ?? 'REC-000',
               items: items,
               subtotal: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
@@ -418,7 +450,18 @@ class AppProvider extends ChangeNotifier {
 
         // 3. Retain any optimistic sales currently in _sales that have not yet loaded from server/DB
         for (final sale in _sales) {
-          if (!tempSales.any((s) => s.id == sale.id)) {
+          final isAlreadyLoaded = tempSales.any((s) {
+            if (s.id == sale.id) {
+              return true;
+            }
+            if (sale.receiptNumber != 'INV-معلق' &&
+                sale.receiptNumber != 'REC-000' &&
+                s.receiptNumber == sale.receiptNumber) {
+              return true;
+            }
+            return false;
+          });
+          if (!isAlreadyLoaded) {
             tempSales.add(sale);
           }
         }

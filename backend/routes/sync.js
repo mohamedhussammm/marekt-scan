@@ -17,8 +17,12 @@ router.post('/batch', async (req, res) => {
 
   for (const op of operations) {
     try {
-      await processOperation(op, req);
-      results.synced.push(op.id);
+      const data = await processOperation(op, req);
+      results.synced.push({
+        id: op.id,
+        receiptNumber: data ? (data.receiptNumber || null) : null,
+        cashierName: data ? (data.cashierName || null) : null
+      });
     } catch (err) {
       results.failed.push({ id: op.id, error: err.message, retries: op.retries });
     }
@@ -54,11 +58,10 @@ async function processOperation(op, req) {
     case 'checkout':
       // Reuse salesController
       await salesController.createTransaction(mockReq, mockRes);
-      break;
+      return mockRes.data;
 
     case 'add_expense':
-      await processExpense(payload, req);
-      break;
+      return await processExpense(payload, req);
 
     case 'add_product':
     case 'update_product':

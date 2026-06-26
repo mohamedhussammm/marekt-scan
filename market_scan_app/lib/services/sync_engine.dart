@@ -129,16 +129,38 @@ class SyncEngine extends ChangeNotifier {
       final result = await _api.syncBatch(payload).timeout(const Duration(seconds: 15));
       
       if (result['success'] == true) {
-        final synced = List<int>.from(result['synced'] ?? []);
+        final List<dynamic> syncedRaw = result['synced'] ?? [];
         final failed = List<dynamic>.from(result['failed'] ?? []);
 
-        for (final id in synced) {
-          // Resolve actual operation item to cache it locally if checkout
-          final matchedOp = ops.firstWhere((o) => o.id == id);
-          if (matchedOp.operation == 'checkout') {
-            await _cacheSyncedCheckout(matchedOp.payload, matchedOp.offlineId);
+        for (final item in syncedRaw) {
+          int id;
+          String? serverReceiptNumber;
+          String? serverCashierName;
+
+          if (item is Map) {
+            id = (item['id'] as num).toInt();
+            serverReceiptNumber = item['receiptNumber'] as String?;
+            serverCashierName = item['cashierName'] as String?;
+          } else if (item is num) {
+            id = item.toInt();
+          } else {
+            continue;
           }
-          await _db.deleteOfflineOp(id);
+
+          // Resolve actual operation item to cache it locally if checkout
+          final matchedOpIndex = ops.indexWhere((o) => o.id == id);
+          if (matchedOpIndex >= 0) {
+            final matchedOp = ops[matchedOpIndex];
+            if (matchedOp.operation == 'checkout') {
+              await _cacheSyncedCheckout(
+                matchedOp.payload,
+                matchedOp.offlineId,
+                serverReceiptNumber: serverReceiptNumber,
+                serverCashierName: serverCashierName,
+              );
+            }
+            await _db.deleteOfflineOp(id);
+          }
         }
         for (final failedOp in failed) {
           await _db.markOpFailed(failedOp['id'] as int, failedOp['retries'] as int);
@@ -163,16 +185,22 @@ class SyncEngine extends ChangeNotifier {
   }
 
   /// Helper to write offline enqueued items to SQLite transactions when successfully synced
-  Future<void> _cacheSyncedCheckout(Map<String, dynamic> payload, String id) async {
+  Future<void> _cacheSyncedCheckout(
+    Map<String, dynamic> payload,
+    String id, {
+    String? serverReceiptNumber,
+    String? serverCashierName,
+  }) async {
     try {
       final itemsData = payload['items'] as List<dynamic>;
-      final receiptNumber = payload['receiptNumber'] ?? 'INV-معلق';
+      final receiptNumber = serverReceiptNumber ?? payload['receiptNumber'] ?? 'INV-معلق';
+      final cashierName = serverCashierName ?? payload['cashierName'] ?? 'أوفلاين';
       await _db.insertLocalTransaction(
         id: id,
         receiptNumber: receiptNumber,
         totalAmount: (payload['totalAmount'] ?? 0.0).toDouble(),
         paymentMethod: payload['paymentMethod'] ?? 'نقداً',
-        cashierName: payload['cashierName'] ?? 'أوفلاين',
+        cashierName: cashierName,
         itemsJson: jsonEncode(itemsData),
         type: 'sale',
         createdAt: DateTime.now(),

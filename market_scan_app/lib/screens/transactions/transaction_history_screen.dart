@@ -195,7 +195,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
           }).toList();
 
           mappedServer.add(Sale(
-            id: tx['_id'],
+            id: offlineId ?? tx['_id'],
             receiptNumber: tx['receiptNumber'] ?? 'REC-000',
             items: items,
             subtotal: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
@@ -370,8 +370,9 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
             );
           }).toList();
 
+          final offlineId = tx['offline_id'] ?? tx['offlineId'];
           mappedServer.add(Sale(
-            id: tx['_id'],
+            id: offlineId ?? tx['_id'],
             receiptNumber: tx['receiptNumber'] ?? 'REC-000',
             items: items,
             subtotal: double.tryParse(tx['totalAmount'].toString()) ?? 0.0,
