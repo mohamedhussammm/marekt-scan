@@ -1147,85 +1147,63 @@ class _StaticScannerOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Luminous Retail: Electric Cyan corner bracket HUD
+    const cyan = AppColors.accentGlow;
+    const cornerSize = 28.0;
+    const strokeWidth = 3.0;
+
+    Widget corner({
+      bool top = true,
+      bool left = true,
+    }) {
+      return Container(
+        width: cornerSize,
+        height: cornerSize,
+        decoration: BoxDecoration(
+          border: Border(
+            top: top ? const BorderSide(color: cyan, width: strokeWidth) : BorderSide.none,
+            bottom: !top ? const BorderSide(color: cyan, width: strokeWidth) : BorderSide.none,
+            left: left ? const BorderSide(color: cyan, width: strokeWidth) : BorderSide.none,
+            right: !left ? const BorderSide(color: cyan, width: strokeWidth) : BorderSide.none,
+          ),
+        ),
+      );
+    }
+
     return Container(
       width: 240,
       height: 140,
       child: Stack(
         children: [
-          // Top-left corner
-          Positioned(
-            left: 0,
-            top: 0,
+          // Subtle outer glow behind the frame
+          Positioned.fill(
             child: Container(
-              width: 24,
-              height: 24,
-              decoration: const BoxDecoration(
-                border: Border(
-                  left: BorderSide(color: Colors.white, width: 3),
-                  top: BorderSide(color: Colors.white, width: 3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: cyan.withValues(alpha: 0.08),
+                  width: 1,
                 ),
               ),
             ),
           ),
-          // Top-right corner
-          Positioned(
-            right: 0,
-            top: 0,
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: const BoxDecoration(
-                border: Border(
-                  right: BorderSide(color: Colors.white, width: 3),
-                  top: BorderSide(color: Colors.white, width: 3),
-                ),
-              ),
-            ),
-          ),
-          // Bottom-left corner
-          Positioned(
-            left: 0,
-            bottom: 0,
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: const BoxDecoration(
-                border: Border(
-                  left: BorderSide(color: Colors.white, width: 3),
-                  bottom: BorderSide(color: Colors.white, width: 3),
-                ),
-              ),
-            ),
-          ),
-          // Bottom-right corner
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: const BoxDecoration(
-                border: Border(
-                  right: BorderSide(color: Colors.white, width: 3),
-                  bottom: BorderSide(color: Colors.white, width: 3),
-                ),
-              ),
-            ),
-          ),
-          // Central scan target circle matching Open Food Facts
+          Positioned(left: 0, top: 0, child: corner(top: true, left: true)),
+          Positioned(right: 0, top: 0, child: corner(top: true, left: false)),
+          Positioned(left: 0, bottom: 0, child: corner(top: false, left: true)),
+          Positioned(right: 0, bottom: 0, child: corner(top: false, left: false)),
           Center(
             child: Container(
-              width: 44,
-              height: 44,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1.5),
+                border: Border.all(color: cyan.withValues(alpha: 0.50), width: 1.5),
                 shape: BoxShape.circle,
               ),
               child: Center(
                 child: Icon(
                   Icons.qr_code_scanner_outlined,
-                  color: Colors.white.withValues(alpha: 0.6),
-                  size: 22,
+                  color: cyan.withValues(alpha: 0.80),
+                  size: 20,
                 ),
               ),
             ),
@@ -1306,26 +1284,33 @@ class _CartPanel extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  color: AppColors.glassCard,
+                  border: const Border(
+                    top: BorderSide(color: AppColors.glassBorder, width: 1),
+                  ),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Drag handle pill
+                    Center(
+                      child: Container(
+                        width: 36, height: 4,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: AppColors.glassBorder,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
                     _SummaryRow('المجموع الفرعي',
                         '${scanner.cartSubtotal.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
                     _SummaryRow('ضريبة (${taxRate.toStringAsFixed(0)}%)',
                         '${scanner.cartTax.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
                     const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 4),
-                      child: Divider(height: 1),
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Divider(height: 1, color: AppColors.divider),
                     ),
                     _SummaryRow(
                       'الإجمالي',
@@ -1333,22 +1318,44 @@ class _CartPanel extends StatelessWidget {
                       bold: true,
                       color: AppColors.primary,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 14),
+                    // Luminous gradient checkout button
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () => onCheckout(scanner),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      height: 50,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [AppColors.primary, AppColors.accentGlow],
+                            begin: Alignment.centerRight,
+                            end: Alignment.centerLeft,
+                          ),
+                          borderRadius: BorderRadius.circular(100),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.withValues(alpha: 0.30),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
-                        icon: const Icon(Icons.check_circle_outline, size: 20),
-                        label: Text(
-                          '${AppStrings.checkout} • ${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
-                          style: const TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(100),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(100),
+                            onTap: () => onCheckout(scanner),
+                            child: Center(
+                              child: Text(
+                                '${AppStrings.checkout}  •  ${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  fontFamily: 'Cairo',
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -1375,16 +1382,16 @@ class _CartItemTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.glassCard,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.glassBorder, width: 1),
       ),
       child: Row(
         children: [
           Container(
             width: 44, height: 44,
             decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
+              color: AppColors.primary.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 22),
@@ -1437,11 +1444,11 @@ class _QtyBtn extends StatelessWidget {
       child: Container(
         width: 28, height: 28,
         decoration: BoxDecoration(
-          color: AppColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.border),
+          color: AppColors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(100),
+          border: Border.all(color: AppColors.glassBorder, width: 1),
         ),
-        child: Icon(icon, size: 16, color: AppColors.primary),
+        child: Icon(icon, size: 14, color: AppColors.primary),
       ),
     );
   }

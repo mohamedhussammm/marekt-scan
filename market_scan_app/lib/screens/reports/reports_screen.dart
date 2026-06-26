@@ -4,8 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/providers/app_provider.dart';
-import '../../services/api_service.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/glass_widgets.dart';
 import 'expenses_management_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
@@ -45,33 +44,53 @@ class _ReportsScreenState extends State<ReportsScreen>
         ),
       ),
       body: RefreshIndicator(
-        onRefresh: () async {
-          await provider.loadDashboardStats();
-        },
+        onRefresh: () async => provider.loadDashboardStats(),
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Period filter
+              // Period filter — glass pills
               Row(
                 children: ['اليوم', 'الأسبوع', 'الشهر'].asMap().entries.map((e) =>
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.only(left: e.key < 2 ? 6 : 0),
-                        child: ChoiceChip(
-                          label: Text(e.value),
-                          selected: _periodIndex == e.key,
-                          onSelected: (_) => setState(() => _periodIndex = e.key),
-                          selectedColor: AppColors.primary,
-                          labelStyle: TextStyle(
-                            color: _periodIndex == e.key ? Colors.white : AppColors.textSecondary,
-                            fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(left: e.key < 2 ? 8 : 0),
+                      child: GestureDetector(
+                        onTap: () => setState(() => _periodIndex = e.key),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _periodIndex == e.key
+                                ? AppColors.primary
+                                : AppColors.glassCard,
+                            borderRadius: BorderRadius.circular(100),
+                            border: Border.all(
+                              color: _periodIndex == e.key
+                                  ? AppColors.primary
+                                  : AppColors.glassBorder,
+                              width: 1,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              e.value,
+                              style: TextStyle(
+                                fontFamily: 'Cairo',
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _periodIndex == e.key
+                                    ? Colors.white
+                                    : AppColors.textSecondary,
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
+                  ),
                 ).toList(),
               ),
               const SizedBox(height: 16),
@@ -226,59 +245,66 @@ class _ReportsScreenState extends State<ReportsScreen>
               // Revenue chart
               Selector<AppProvider, List<double>>(
                 selector: (_, p) => p.weeklySales,
-                builder: (context, weeklySales, __) => Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('مخطط الإيرادات الأسبوعية',
-                            style: Theme.of(context).textTheme.titleLarge),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          height: 180,
-                          child: LineChart(LineChartData(
-                            lineBarsData: [
-                              LineChartBarData(
-                                spots: weeklySales.asMap().entries
-                                    .map((e) => FlSpot(e.key.toDouble(), e.value))
-                                    .toList(),
-                                isCurved: true,
-                                color: AppColors.primary,
-                                barWidth: 3,
-                                belowBarData: BarAreaData(
-                                  show: true,
-                                  color: AppColors.primary.withValues(alpha: 0.1),
-                                ),
-                                dotData: const FlDotData(show: false),
+                builder: (context, weeklySales, __) => GlassPanel(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('مخطط الإيرادات الأسبوعية',
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 180,
+                        child: LineChart(LineChartData(
+                          lineBarsData: [
+                            LineChartBarData(
+                              spots: weeklySales.asMap().entries
+                                  .map((e) => FlSpot(e.key.toDouble(), e.value))
+                                  .toList(),
+                              isCurved: true,
+                              gradient: const LinearGradient(
+                                colors: [AppColors.primary, AppColors.accentGlow],
                               ),
-                            ],
-                            titlesData: FlTitlesData(
-                              bottomTitles: AxisTitles(
-                                sideTitles: SideTitles(
-                                  showTitles: true,
-                                  getTitlesWidget: (v, _) {
-                                    const days = ['أ', 'إ', 'ث', 'أر', 'خ', 'ج', 'س'];
-                                    return Text(days[v.toInt() % 7],
-                                        style: const TextStyle(fontSize: 10, color: AppColors.textHint));
-                                  },
+                              barWidth: 3,
+                              belowBarData: BarAreaData(
+                                show: true,
+                                gradient: LinearGradient(
+                                  colors: [
+                                    AppColors.accentGlow.withValues(alpha: 0.15),
+                                    AppColors.accentGlow.withValues(alpha: 0.0),
+                                  ],
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
                                 ),
                               ),
-                              leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                              topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                              dotData: const FlDotData(show: false),
                             ),
-                            gridData: FlGridData(
-                              show: true,
-                              getDrawingHorizontalLine: (_) =>
-                                  const FlLine(color: AppColors.divider, strokeWidth: 1),
-                              drawVerticalLine: false,
+                          ],
+                          titlesData: FlTitlesData(
+                            bottomTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: true,
+                                getTitlesWidget: (v, _) {
+                                  const days = ['أ', 'إ', 'ث', 'أر', 'خ', 'ج', 'س'];
+                                  return Text(days[v.toInt() % 7],
+                                      style: const TextStyle(fontSize: 10, color: AppColors.textHint));
+                                },
+                              ),
                             ),
-                            borderData: FlBorderData(show: false),
-                          )),
-                        ),
-                      ],
-                    ),
+                            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          ),
+                          gridData: FlGridData(
+                            show: true,
+                            getDrawingHorizontalLine: (_) =>
+                                const FlLine(color: AppColors.divider, strokeWidth: 1),
+                            drawVerticalLine: false,
+                          ),
+                          borderData: FlBorderData(show: false),
+                        )),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -287,39 +313,37 @@ class _ReportsScreenState extends State<ReportsScreen>
               // Category pie chart
               Selector<AppProvider, List<dynamic>>(
                 selector: (_, p) => p.categoriesAggregationList,
-                builder: (context, catAggList, __) => Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(AppStrings.salesByCategory,
-                            style: Theme.of(context).textTheme.titleLarge),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          height: 180,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: catAggList.isEmpty
-                                    ? const Center(child: Text('لا توجد بيانات للفئات'))
-                                    : PieChart(PieChartData(
-                                        sections: _buildPieSections(catAggList),
-                                        sectionsSpace: 2,
-                                        centerSpaceRadius: 40,
-                                      )),
-                              ),
-                              const SizedBox(width: 8),
-                              Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: _buildPieLegends(catAggList),
-                              ),
-                            ],
-                          ),
+                builder: (context, catAggList, __) => GlassPanel(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(AppStrings.salesByCategory,
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 180,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: catAggList.isEmpty
+                                  ? const Center(child: Text('لا توجد بيانات للفئات'))
+                                  : PieChart(PieChartData(
+                                      sections: _buildPieSections(catAggList),
+                                      sectionsSpace: 2,
+                                      centerSpaceRadius: 40,
+                                    )),
+                            ),
+                            const SizedBox(width: 8),
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: _buildPieLegends(catAggList),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -328,30 +352,28 @@ class _ReportsScreenState extends State<ReportsScreen>
               // Top products
               Selector<AppProvider, List<dynamic>>(
                 selector: (_, p) => p.topProductsList,
-                builder: (context, topProdsList, __) => Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(AppStrings.topProducts,
-                            style: Theme.of(context).textTheme.titleLarge),
-                        const SizedBox(height: 12),
-                        if (topProdsList.isEmpty)
-                          const Center(child: Text('لا توجد معاملات مبيعات بعد'))
-                        else
-                          ...topProdsList.map((tp) {
-                            final double maxQty = double.tryParse(topProdsList[0]['qtySold'].toString()) ?? 1.0;
-                            final double qty = double.tryParse(tp['qtySold'].toString()) ?? 0.0;
-                            final double percent = (qty / maxQty).clamp(0.0, 1.0);
-                            return _TopProductRow(
-                              name: tp['name'] ?? 'منتج غير معروف',
-                              sales: '${tp['totalSales']} ${AppStrings.currencySymbol} (${tp['qtySold']} قطعة)',
-                              percent: percent,
-                            );
-                          }),
-                      ],
-                    ),
+                builder: (context, topProdsList, __) => GlassPanel(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(AppStrings.topProducts,
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 12),
+                      if (topProdsList.isEmpty)
+                        const Center(child: Text('لا توجد معاملات مبيعات بعد'))
+                      else
+                        ...topProdsList.map((tp) {
+                          final double maxQty = double.tryParse(topProdsList[0]['qtySold'].toString()) ?? 1.0;
+                          final double qty = double.tryParse(tp['qtySold'].toString()) ?? 0.0;
+                          final double percent = (qty / maxQty).clamp(0.0, 1.0);
+                          return _TopProductRow(
+                            name: tp['name'] ?? 'منتج غير معروف',
+                            sales: '${tp['totalSales']} ${AppStrings.currencySymbol} (${tp['qtySold']} قطعة)',
+                            percent: percent,
+                          );
+                        }),
+                    ],
                   ),
                 ),
               ),
@@ -397,22 +419,28 @@ class _KpiCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
+    return GlassPanel(
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 24),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
           const SizedBox(height: 8),
           Text(value,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: color)),
+              style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w700, color: color,
+                  fontFamily: 'Cairo', letterSpacing: -0.3)),
           Text(title,
-              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+              style: const TextStyle(
+                  fontSize: 10, color: AppColors.textSecondary, fontFamily: 'Cairo'),
+              maxLines: 1, overflow: TextOverflow.ellipsis),
         ],
       ),
     );

@@ -594,7 +594,7 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
 
     return ListView.builder(
       controller: _scrollCtrl,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
       itemCount: filtered.length + (_isLoadingMore ? 1 : 0),
       addAutomaticKeepAlives: false,
       addRepaintBoundaries: true,

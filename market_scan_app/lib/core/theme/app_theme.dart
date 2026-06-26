@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../constants/app_colors.dart';
 
@@ -19,13 +20,20 @@ class AppTheme {
         surfaceContainerHighest: AppColors.surfaceVariant,
       ),
       scaffoldBackgroundColor: AppColors.background,
+
+      // ── Typography ──────────────────────────────────────────────────────
+      // Arabic text uses IBM Plex Sans Arabic (best Arabic support).
+      // All numeric/Latin values are styled inline with Hanken Grotesk feel
+      // using fontFeatures for tabular figures where available.
       textTheme: GoogleFonts.ibmPlexSansArabicTextTheme().copyWith(
         displayLarge: GoogleFonts.ibmPlexSansArabic(
-          fontSize: 32, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+          fontSize: 32, fontWeight: FontWeight.w700, color: AppColors.textPrimary,
+          letterSpacing: -0.5),
         displayMedium: GoogleFonts.ibmPlexSansArabic(
           fontSize: 28, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
         headlineLarge: GoogleFonts.ibmPlexSansArabic(
-          fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+          fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.textPrimary,
+          letterSpacing: -0.3),
         headlineMedium: GoogleFonts.ibmPlexSansArabic(
           fontSize: 20, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
         headlineSmall: GoogleFonts.ibmPlexSansArabic(
@@ -43,46 +51,61 @@ class AppTheme {
         labelLarge: GoogleFonts.ibmPlexSansArabic(
           fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textOnPrimary),
       ),
+
+      // ── AppBar ──────────────────────────────────────────────────────────
+      // Transparent app bar — each screen adds its own frosted glass style.
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: true,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
         titleTextStyle: GoogleFonts.ibmPlexSansArabic(
           fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white),
       ),
+
+      // ── Cards — Glass Acrylic Slab ───────────────────────────────────────
       cardTheme: CardThemeData(
-        color: AppColors.cardBackground,
+        color: AppColors.glassCard,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: AppColors.border, width: 1),
+          side: const BorderSide(color: AppColors.glassBorder, width: 1),
         ),
+        margin: EdgeInsets.zero,
       ),
+
+      // ── Elevated Buttons — Pill shape ──────────────────────────────────
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
           elevation: 0,
+          shadowColor: Colors.transparent,
           minimumSize: const Size(double.infinity, 52),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
           textStyle: GoogleFonts.ibmPlexSansArabic(
             fontSize: 16, fontWeight: FontWeight.w600),
         ),
       ),
+
+      // ── Outlined Buttons ───────────────────────────────────────────────
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.primary,
           side: const BorderSide(color: AppColors.primary, width: 1.5),
           minimumSize: const Size(double.infinity, 52),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
           textStyle: GoogleFonts.ibmPlexSansArabic(
             fontSize: 16, fontWeight: FontWeight.w600),
         ),
       ),
+
+      // ── Input Fields — Inset Glass ─────────────────────────────────────
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.surfaceVariant,
+        fillColor: AppColors.surfaceContainerHigh, // slightly deeper than glass card
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -90,7 +113,7 @@ class AppTheme {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.border, width: 1),
+          borderSide: const BorderSide(color: AppColors.glassBorder, width: 1),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -103,30 +126,42 @@ class AppTheme {
         labelStyle: GoogleFonts.ibmPlexSansArabic(color: AppColors.textSecondary),
         hintStyle: GoogleFonts.ibmPlexSansArabic(color: AppColors.textHint),
       ),
+
+      // ── Bottom Navigation (fallback — MainNavigation uses custom widget) ─
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: Colors.white,
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textHint,
         type: BottomNavigationBarType.fixed,
-        elevation: 8,
+        elevation: 0,
       ),
+
+      // ── Chips — Glass Pills ─────────────────────────────────────────────
       chipTheme: ChipThemeData(
-        backgroundColor: AppColors.surfaceVariant,
+        backgroundColor: AppColors.surfaceContainerLow,
         selectedColor: AppColors.primaryContainer,
         labelStyle: GoogleFonts.ibmPlexSansArabic(fontSize: 12),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
+        side: const BorderSide(color: AppColors.glassBorder, width: 1),
       ),
+
+      // ── Dividers ────────────────────────────────────────────────────────
       dividerTheme: const DividerThemeData(
         color: AppColors.divider,
         thickness: 1,
       ),
+
+      // ── Snack Bars ──────────────────────────────────────────────────────
       snackBarTheme: SnackBarThemeData(
         backgroundColor: AppColors.primaryDark,
         contentTextStyle: GoogleFonts.ibmPlexSansArabic(color: Colors.white),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         behavior: SnackBarBehavior.floating,
+        elevation: 0,
       ),
+
+      // ── Page Transitions ─────────────────────────────────────────────────
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: PremiumPageTransitionsBuilder(),
@@ -148,7 +183,6 @@ class PremiumPageTransitionsBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    // Elegant hardware-accelerated 5% slide up + fade transition
     final slideTween = Tween<Offset>(
       begin: const Offset(0.0, 0.05),
       end: Offset.zero,
