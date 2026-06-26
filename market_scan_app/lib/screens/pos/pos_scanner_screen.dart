@@ -473,6 +473,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text(AppStrings.posScanner),
         automaticallyImplyLeading: false,
@@ -606,10 +607,9 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
         children: [
           Column(
             children: [
-              // ── Scanner (top 42%) ─────────────────────────────────────────
-              SizedBox(
+               SizedBox(
                 width: double.infinity,
-                height: MediaQuery.of(context).size.height * 0.42,
+                height: (MediaQuery.of(context).size.height * 0.38).clamp(180.0, 260.0),
                 // RepaintBoundary: isolates camera paint so cart scroll
                 // updates don't force the camera preview to repaint.
                 child: RepaintBoundary(
