@@ -12,6 +12,7 @@ const transactionSchema = new mongoose.Schema({
     lineTotal: { type: Number, required: true }
   }],
   totalAmount: { type: Number, required: true },
+  amountPaid: { type: Number },
   paymentMethod: { type: String, required: true },
   shiftId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shift' },
   cashierName: { type: String, default: 'المدير' }

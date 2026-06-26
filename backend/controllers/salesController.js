@@ -7,7 +7,7 @@ const Settings = require('../models/Settings');
 
 exports.createTransaction = async (req, res) => {
   try {
-    const { items, totalAmount, paymentMethod, offline_id } = req.body;
+    const { items, totalAmount, amountPaid, paymentMethod, offline_id } = req.body;
 
     // ── INPUT VALIDATION ──────────────────────────────────────────────────
     if (!Array.isArray(items) || items.length === 0) {
@@ -123,6 +123,7 @@ exports.createTransaction = async (req, res) => {
       storeName: req.storeName,
       items,
       totalAmount,
+      amountPaid: amountPaid !== undefined ? amountPaid : totalAmount,
       paymentMethod,
       shiftId: activeShift ? activeShift._id : undefined,
       cashierName: req.userRole === 'admin' ? 'المدير' : (req.username || 'المدير')

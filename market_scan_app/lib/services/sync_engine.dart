@@ -199,6 +199,7 @@ class SyncEngine extends ChangeNotifier {
         id: id,
         receiptNumber: receiptNumber,
         totalAmount: (payload['totalAmount'] ?? 0.0).toDouble(),
+        amountPaid: payload['amountPaid'] != null ? (payload['amountPaid'] as num).toDouble() : null,
         paymentMethod: payload['paymentMethod'] ?? 'نقداً',
         cashierName: cashierName,
         itemsJson: jsonEncode(itemsData),

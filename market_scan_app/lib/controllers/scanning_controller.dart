@@ -275,6 +275,7 @@ class ScanningController extends ChangeNotifier {
       'offline_id': offlineId,
       'items': itemsPayload,
       'totalAmount': finalTotalAmount,
+      'amountPaid': finalAmountPaid,
       'paymentMethod': paymentMethod,
     };
 
@@ -294,6 +295,7 @@ class ScanningController extends ChangeNotifier {
           id: offlineId,
           receiptNumber: realReceiptNumber,
           totalAmount: finalTotalAmount,
+          amountPaid: finalAmountPaid,
           paymentMethod: paymentMethod,
           cashierName: realCashierName,
           itemsJson: jsonEncode(itemsPayload),
@@ -328,6 +330,7 @@ class ScanningController extends ChangeNotifier {
           id: offlineId,
           receiptNumber: 'INV-معلق',
           totalAmount: finalTotalAmount,
+          amountPaid: finalAmountPaid,
           paymentMethod: paymentMethod,
           cashierName: 'أوفلاين',
           itemsJson: jsonEncode(itemsPayload),
@@ -363,6 +366,7 @@ class ScanningController extends ChangeNotifier {
         id: offlineId,
         receiptNumber: 'INV-معلق',
         totalAmount: finalTotalAmount,
+        amountPaid: finalAmountPaid,
         paymentMethod: paymentMethod,
         cashierName: 'أوفلاين',
         itemsJson: jsonEncode(itemsPayload),

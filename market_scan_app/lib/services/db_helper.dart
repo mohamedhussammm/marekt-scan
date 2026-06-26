@@ -21,7 +21,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -67,6 +67,11 @@ CREATE TABLE transactions (
   is_offline INTEGER DEFAULT 0
 )
 ''');
+          } catch (_) {}
+        }
+        if (oldVersion < 6) {
+          try {
+            await db.execute('ALTER TABLE transactions ADD COLUMN amount_paid REAL');
           } catch (_) {}
         }
       },
@@ -117,6 +122,7 @@ CREATE TABLE transactions (
   id TEXT PRIMARY KEY,
   receipt_number TEXT NOT NULL,
   total_amount REAL NOT NULL,
+  amount_paid REAL,
   payment_method TEXT NOT NULL,
   cashier_name TEXT NOT NULL,
   items_json TEXT NOT NULL,
@@ -288,6 +294,7 @@ CREATE TABLE transactions (
     required String id,
     required String receiptNumber,
     required double totalAmount,
+    double? amountPaid,
     required String paymentMethod,
     required String cashierName,
     required String itemsJson,
@@ -302,6 +309,7 @@ CREATE TABLE transactions (
         'id': id,
         'receipt_number': receiptNumber,
         'total_amount': totalAmount,
+        'amount_paid': amountPaid ?? totalAmount,
         'payment_method': paymentMethod,
         'cashier_name': cashierName,
         'items_json': itemsJson,
