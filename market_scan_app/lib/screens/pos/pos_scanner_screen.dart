@@ -1097,18 +1097,21 @@ class _ScannerSectionState extends State<_ScannerSection> {
             selector: (_, s) => s.cartItems.isNotEmpty,
             builder: (context, hasItems, _) {
               if (!hasItems) return const SizedBox.shrink();
-              return ElevatedButton.icon(
-                onPressed: () => context.read<ScanningController>().clearCart(),
-                icon: const Icon(Icons.delete_outline, size: 16),
-                label: const Text(
-                  'مسح السلة',
-                  style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black54,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              return SizedBox(
+                width: 120,
+                child: ElevatedButton.icon(
+                  onPressed: () => context.read<ScanningController>().clearCart(),
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: const Text(
+                    'مسح السلة',
+                    style: TextStyle(fontFamily: 'Cairo', fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black54,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  ),
                 ),
               );
             },
