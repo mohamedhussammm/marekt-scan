@@ -716,6 +716,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                   final amount = double.tryParse(cashCtrl.text) ?? 0.0;
                   setDialogState(() => isSubmitting = true);
                   final res = await context.read<AppProvider>().openRegister(amount);
+                  if (!context.mounted) return;
                   if (ctx.mounted) {
                     Navigator.pop(ctx);
                   }
@@ -777,6 +778,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                   final amount = double.tryParse(cashCtrl.text) ?? 0.0;
                   setDialogState(() => isSubmitting = true);
                   final res = await context.read<AppProvider>().closeRegister(amount);
+                  if (!context.mounted) return;
                   if (ctx.mounted) {
                     Navigator.pop(ctx);
                   }
@@ -884,6 +886,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                     desc, 
                     category: _dialogCategory,
                   );
+                  if (!context.mounted) return;
                   if (ctx.mounted) {
                     Navigator.pop(ctx);
                   }
