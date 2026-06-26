@@ -331,131 +331,154 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
       builder: (ctx) {
         bool isCheckingOut = false;
         return StatefulBuilder(
-          builder: (ctx, setModalState) => Padding(
-            padding: EdgeInsets.fromLTRB(
-                24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                      width: 40, height: 4,
-                      decoration: BoxDecoration(
-                          color: AppColors.border,
-                          borderRadius: BorderRadius.circular(2))),
-                ),
-                const SizedBox(height: 20),
-                Text('إتمام عملية البيع',
-                    style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 20),
-                _SummaryRow('المجموع الفرعي',
-                    '${scanner.cartSubtotal.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
-                _SummaryRow('ضريبة القيمة المضافة (14%)',
-                    '${scanner.cartTax.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
-                const Divider(height: 20),
-                _SummaryRow('الإجمالي',
-                    '${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
-                    bold: true, color: AppColors.primary),
-                const SizedBox(height: 16),
-                Text('طريقة الدفع',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                Row(
-                  children: ['نقداً', 'بطاقة', 'تحويل'].map((method) =>
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: ChoiceChip(
-                            label: Text(method),
-                            selected: paymentMethod == method,
-                            onSelected: (_) =>
-                                setModalState(() => paymentMethod = method),
-                            selectedColor: AppColors.primaryContainer,
-                            labelStyle: TextStyle(
-                                color: paymentMethod == method
-                                    ? AppColors.primary : AppColors.textSecondary),
+          builder: (ctx, setModalState) {
+            final double amountPaid = double.tryParse(_amountCtrl.text) ?? scanner.totalAmount;
+            final double change = amountPaid - scanner.totalAmount;
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                  24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                        width: 40, height: 4,
+                        decoration: BoxDecoration(
+                            color: AppColors.border,
+                            borderRadius: BorderRadius.circular(2))),
+                  ),
+                  const SizedBox(height: 20),
+                  Text('إتمام عملية البيع',
+                      style: Theme.of(context).textTheme.headlineSmall),
+                  const SizedBox(height: 20),
+                  _SummaryRow('المجموع الفرعي',
+                      '${scanner.cartSubtotal.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
+                  _SummaryRow('ضريبة القيمة المضافة (14%)',
+                      '${scanner.cartTax.toStringAsFixed(2)} ${AppStrings.currencySymbol}'),
+                  const Divider(height: 20),
+                  _SummaryRow('الإجمالي',
+                      '${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
+                      bold: true, color: AppColors.primary),
+                  const SizedBox(height: 16),
+                  Text('طريقة الدفع',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: ['نقداً', 'بطاقة', 'تحويل'].map((method) =>
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: ChoiceChip(
+                              label: Text(method),
+                              selected: paymentMethod == method,
+                              onSelected: (_) {
+                                setModalState(() {
+                                  paymentMethod = method;
+                                  if (method != 'نقداً') {
+                                    _amountCtrl.text = scanner.totalAmount.toStringAsFixed(2);
+                                  }
+                                });
+                              },
+                              selectedColor: AppColors.primaryContainer,
+                              labelStyle: TextStyle(
+                                  color: paymentMethod == method
+                                      ? AppColors.primary : AppColors.textSecondary),
+                            ),
                           ),
                         ),
-                      ),
-                  ).toList(),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _amountCtrl,
-                  keyboardType: TextInputType.number,
-                  textDirection: TextDirection.ltr,
-                  decoration: const InputDecoration(
-                    labelText: 'المبلغ المدفوع',
-                    prefixIcon: Icon(Icons.payments_outlined, color: AppColors.primary),
+                    ).toList(),
                   ),
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: isCheckingOut
-                      ? null
-                      : () async {
-                          setModalState(() {
-                            isCheckingOut = true;
-                          });
-                          try {
-                            final result = await scanner.checkout(
-                              paymentMethod,
-                              onSaleCreated: (sale) {
-                                if (context.mounted) {
-                                  context.read<AppProvider>().addLocalSale(sale);
-                                }
-                              },
-                            );
-                            if (!ctx.mounted) return;
-                            Navigator.pop(ctx);
-                            if (result['success'] == true) {
-                              if (context.mounted) {
-                                context.read<AppProvider>().loadDashboardStats();
-                              }
-                              final isOffline = result['isOffline'] == true;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Row(
-                                    children: [
-                                      Icon(isOffline ? Icons.cloud_off : Icons.check_circle, color: Colors.white),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        isOffline ? 'تم حفظ البيع محلياً ✓ — سيتم رفعه للسيرفر عند الاتصال' : 'تمت العملية بنجاح!',
-                                        style: const TextStyle(fontFamily: 'Cairo'),
-                                      ),
-                                    ],
-                                  ),
-                                  backgroundColor: isOffline ? Colors.orange : Colors.green,
-                                ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _amountCtrl,
+                    keyboardType: TextInputType.number,
+                    textDirection: TextDirection.ltr,
+                    enabled: paymentMethod == 'نقداً',
+                    onChanged: (val) => setModalState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'المبلغ المدفوع',
+                      prefixIcon: Icon(Icons.payments_outlined, color: AppColors.primary),
+                    ),
+                  ),
+                  if (paymentMethod == 'نقداً') ...[
+                    const SizedBox(height: 12),
+                    _SummaryRow(
+                      change >= 0 ? 'الباقي للعميل' : 'المتبقي للدفع',
+                      '${change.abs().toStringAsFixed(2)} ${AppStrings.currencySymbol}',
+                      bold: true,
+                      color: change >= 0 ? AppColors.success : AppColors.error,
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: isCheckingOut || (paymentMethod == 'نقداً' && amountPaid < scanner.totalAmount)
+                        ? null
+                        : () async {
+                            setModalState(() {
+                              isCheckingOut = true;
+                            });
+                            try {
+                              final result = await scanner.checkout(
+                                paymentMethod,
+                                amountPaid: amountPaid,
+                                onSaleCreated: (sale) {
+                                  if (context.mounted) {
+                                    context.read<AppProvider>().addLocalSale(sale);
+                                  }
+                                },
                               );
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("خطأ: ${result['error']}")));
-                              setModalState(() {
-                                isCheckingOut = false;
-                              });
+                              if (!ctx.mounted) return;
+                              Navigator.pop(ctx);
+                              if (result['success'] == true) {
+                                if (context.mounted) {
+                                  context.read<AppProvider>().loadDashboardStats();
+                                }
+                                final isOffline = result['isOffline'] == true;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Row(
+                                      children: [
+                                        Icon(isOffline ? Icons.cloud_off : Icons.check_circle, color: Colors.white),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          isOffline ? 'تم حفظ البيع محلياً ✓ — سيتم رفعه للسيرفر عند الاتصال' : 'تمت العملية بنجاح!',
+                                          style: const TextStyle(fontFamily: 'Cairo'),
+                                        ),
+                                      ],
+                                    ),
+                                    backgroundColor: isOffline ? Colors.orange : Colors.green,
+                                  ),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("خطأ: ${result['error']}")));
+                                setModalState(() {
+                                  isCheckingOut = false;
+                                });
+                              }
+                            } catch (e) {
+                              if (ctx.mounted) {
+                                setModalState(() {
+                                  isCheckingOut = false;
+                                });
+                              }
                             }
-                          } catch (e) {
-                            if (ctx.mounted) {
-                              setModalState(() {
-                                isCheckingOut = false;
-                              });
-                            }
-                          }
-                        },
-                  child: isCheckingOut
-                      ? const SizedBox(
-                          height: 20, width: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
-                        )
-                      : const Text(AppStrings.checkout),
-                ),
-              ],
-            ),
-          ),
+                          },
+                    child: isCheckingOut
+                        ? const SizedBox(
+                            height: 20, width: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
+                          )
+                        : const Text(AppStrings.checkout),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );

@@ -251,12 +251,13 @@ class ScanningController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Map<String, dynamic>> checkout(String paymentMethod, {void Function(Sale)? onSaleCreated}) async {
+  Future<Map<String, dynamic>> checkout(String paymentMethod, {double? amountPaid, void Function(Sale)? onSaleCreated}) async {
     if (cartItems.isEmpty) return {'success': false, 'error': 'Cart is empty'};
 
     final offlineId = const Uuid().v4();
     final List<CartItem> clonedCart = List<CartItem>.from(cartItems);
     final double finalTotalAmount = totalAmount; // Store total before clearing cart
+    final double finalAmountPaid = amountPaid ?? finalTotalAmount;
 
     final itemsPayload = cartItems
         .map((i) {
@@ -310,7 +311,7 @@ class ScanningController extends ChangeNotifier {
             discount: 0,
             tax: 0,
             total: finalTotalAmount,
-            amountPaid: finalTotalAmount,
+            amountPaid: finalAmountPaid,
             paymentMethod: paymentMethod,
             createdAt: DateTime.now(),
             type: 'sale',
@@ -344,7 +345,7 @@ class ScanningController extends ChangeNotifier {
             discount: 0,
             tax: 0,
             total: finalTotalAmount,
-            amountPaid: finalTotalAmount,
+            amountPaid: finalAmountPaid,
             paymentMethod: paymentMethod,
             createdAt: DateTime.now(),
             type: 'sale',
@@ -379,7 +380,7 @@ class ScanningController extends ChangeNotifier {
           discount: 0,
           tax: 0,
           total: finalTotalAmount,
-          amountPaid: finalTotalAmount,
+          amountPaid: finalAmountPaid,
           paymentMethod: paymentMethod,
           createdAt: DateTime.now(),
           type: 'sale',
