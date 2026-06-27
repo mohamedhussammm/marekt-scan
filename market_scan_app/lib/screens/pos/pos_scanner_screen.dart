@@ -1065,26 +1065,54 @@ class _ScannerSectionState extends State<_ScannerSection> {
   // construction time. This guarantees a clean native camera session every time
   // the widget enters the tree, and stop()+dispose() on every exit.
   late MobileScannerController _scannerController;
+  bool _isCameraRunning = true;
 
   @override
   void initState() {
     super.initState();
     _scannerController = MobileScannerController(
-      detectionSpeed: DetectionSpeed.normal,
-      detectionTimeoutMs: 1000,
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      detectionTimeoutMs: 500,
       returnImage: false,
       formats: [
         BarcodeFormat.ean13,
         BarcodeFormat.ean8,
-        BarcodeFormat.code128,
+        BarcodeFormat.upcA,
+        BarcodeFormat.upcE,
         BarcodeFormat.code39,
+        BarcodeFormat.code93,
+        BarcodeFormat.code128,
+        BarcodeFormat.codabar,
+        BarcodeFormat.itf,
         BarcodeFormat.qrCode,
       ],
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<ScanningController>().addListener(_onScanningControllerUpdate);
+      }
+    });
+  }
+
+  void _onScanningControllerUpdate() {
+    if (!mounted) return;
+    final scanner = context.read<ScanningController>();
+    final shouldStop = (scanner.unknownBarcode != null || scanner.unregisteredProduct != null);
+
+    if (shouldStop && _isCameraRunning) {
+      _isCameraRunning = false;
+      _scannerController.stop();
+    } else if (!shouldStop && !_isCameraRunning) {
+      _isCameraRunning = true;
+      _scannerController.start();
+    }
   }
 
   @override
   void dispose() {
+    try {
+      context.read<ScanningController>().removeListener(_onScanningControllerUpdate);
+    } catch (_) {}
     // Bug #2: stop() first — releases the native camera session cleanly
     // before the Dart controller object is garbage collected.
     _scannerController.stop();

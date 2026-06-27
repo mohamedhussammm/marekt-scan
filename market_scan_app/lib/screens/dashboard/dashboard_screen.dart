@@ -64,6 +64,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.build(context);
     final provider = context.read<AppProvider>();
     final isCashier = context.select<AppProvider, bool>((p) => p.userRole == 'cashier');
+    final double screenWidth = MediaQuery.of(context).size.width;
+    // Dynamic aspect ratio based on screen width to give more vertical breathing room on narrow devices
+    final double childAspectRatio = screenWidth < 360 ? 1.3 : (screenWidth < 400 ? 1.45 : 1.55);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -204,11 +207,11 @@ class _DashboardScreenState extends State<DashboardScreen>
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
-                  childAspectRatio: 1.5,
+                  childAspectRatio: childAspectRatio,
                 ),
                 delegate: SliverChildListDelegate([
                   Selector<AppProvider, double>(
@@ -427,43 +430,53 @@ class _GlassStatCard extends StatelessWidget {
       child: Opacity(
         opacity: isDimmed ? 0.45 : 1.0,
         child: GlassPanel(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, color: color, size: 20),
+                child: Icon(icon, color: color, size: 18),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: color,
-                      fontFamily: 'Cairo',
-                      letterSpacing: -0.3,
+              const SizedBox(height: 4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        value,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                          fontFamily: 'Cairo',
+                          letterSpacing: -0.3,
+                        ),
+                      ),
                     ),
-                  ),
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: AppColors.textSecondary,
-                      fontFamily: 'Cairo',
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: AppColors.textSecondary,
+                          fontFamily: 'Cairo',
+                        ),
+                      ),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),

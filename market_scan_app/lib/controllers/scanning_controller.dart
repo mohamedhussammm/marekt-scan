@@ -74,10 +74,10 @@ class ScanningController extends ChangeNotifier {
     // ── Validation check to filter out misreads and wrong numbers ──
     if (!BarcodeValidator.isValid(rawBarcode)) return;
 
-    // ── Debounce: ignore the same barcode scanned within 1.2 s ──────────
+    // ── Debounce: ignore the same barcode scanned within 1.0 s ──────────
     final now = DateTime.now();
     if (rawBarcode == _lastBarcode && _lastBarcodeTime != null) {
-      if (now.difference(_lastBarcodeTime!).inMilliseconds < 1200) return;
+      if (now.difference(_lastBarcodeTime!).inMilliseconds < 1000) return;
     }
     _lastBarcode = rawBarcode;
     _lastBarcodeTime = now;
@@ -139,7 +139,7 @@ class ScanningController extends ChangeNotifier {
       debugPrint('ScanningController.processBarcode error: $e');
     } finally {
       // Always schedule the cooldown reset, regardless of success or failure
-      Timer(const Duration(milliseconds: 2500), () {
+      Timer(const Duration(milliseconds: 500), () {
         pauseScanning = false;
       });
     }
