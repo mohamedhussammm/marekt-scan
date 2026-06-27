@@ -1071,8 +1071,8 @@ class _ScannerSectionState extends State<_ScannerSection> {
   void initState() {
     super.initState();
     _scannerController = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      detectionTimeoutMs: 500,
+      detectionSpeed: DetectionSpeed.normal,
+      detectionTimeoutMs: 250,
       returnImage: false,
       formats: [
         BarcodeFormat.ean13,
