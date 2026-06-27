@@ -111,6 +111,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
     final stockCtrl = TextEditingController();
 
     bool isSaving = false;
+    final scanCtrl = context.read<ScanningController>();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -147,7 +148,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: () {
-                        context.read<ScanningController>().clearUnknownBarcode();
+                        scanCtrl.clearUnknownBarcode();
                         _isShowingAddSheet = false;
                         Navigator.pop(ctx);
                       },
@@ -175,7 +176,6 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                               minStockLevel: 10,
                             );
                             // Capture before await to avoid unmounted context
-                            final scanCtrl = context.read<ScanningController>();
                             final scaffoldMsg = ScaffoldMessenger.of(context);
                             final success = await scanCtrl.addNewProduct(product);
                             if (!ctx.mounted) return;
@@ -209,7 +209,10 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
         },
       ),
     // Bug #6: reset flag on ANY dismiss path (back gesture, tap outside, etc.)
-    ).whenComplete(() => _isShowingAddSheet = false);
+    ).whenComplete(() {
+      _isShowingAddSheet = false;
+      scanCtrl.clearUnknownBarcode();
+    });
   }
 
   void _showRegisterProductDialog(BuildContext context, Product product) {
@@ -218,6 +221,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
     final stockCtrl = TextEditingController();
 
     bool isSaving = false;
+    final scanCtrl = context.read<ScanningController>();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -251,7 +255,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                       Expanded(
                         child: OutlinedButton(
                           onPressed: () {
-                            context.read<ScanningController>().clearUnregisteredProduct();
+                            scanCtrl.clearUnregisteredProduct();
                             _isShowingRegisterSheet = false;
                             Navigator.pop(ctx);
                           },
@@ -274,7 +278,6 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                             
                             setSheetState(() => isSaving = true);
                             
-                            final scanCtrl = context.read<ScanningController>();
                             final scaffoldMsg = ScaffoldMessenger.of(context);
                             
                             final success = await scanCtrl.registerStoreProduct(
@@ -316,7 +319,10 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
         },
       ),
     // Bug #6: reset flag on ANY dismiss path (back gesture, tap outside, etc.)
-    ).whenComplete(() => _isShowingRegisterSheet = false);
+    ).whenComplete(() {
+      _isShowingRegisterSheet = false;
+      scanCtrl.clearUnregisteredProduct();
+    });
   }
 
   void _showCheckoutDialog(BuildContext context, ScanningController scanner) {
@@ -1070,6 +1076,10 @@ class _ScannerSectionState extends State<_ScannerSection> {
   @override
   void initState() {
     super.initState();
+    final scanner = context.read<ScanningController>();
+    scanner.clearUnknownBarcode();
+    scanner.clearUnregisteredProduct();
+
     _scannerController = MobileScannerController(
       detectionSpeed: DetectionSpeed.normal,
       detectionTimeoutMs: 250,
