@@ -44,12 +44,12 @@ class AppColors {
   static const Color border = Color(0xFFBBC9CF);
   static const Color divider = Color(0x30BBC9CF); // silver at 19% opacity
 
-  // Chart colors — cyan-based palette
-  static const Color chart1 = Color(0xFF00677E);
-  static const Color chart2 = Color(0xFF3CD7FF);
-  static const Color chart3 = Color(0xFF00B4D8);
-  static const Color chart4 = Color(0xFF545F73);
-  static const Color chart5 = Color(0xFF5A5F62);
+  // Chart colors — high-contrast distinct palette
+  static const Color chart1 = Color(0xFF0077B6); // Ocean Blue
+  static const Color chart2 = Color(0xFFF26419); // Coral Orange
+  static const Color chart3 = Color(0xFF06D6A0); // Mint Green
+  static const Color chart4 = Color(0xFFFFB703); // Amber Yellow
+  static const Color chart5 = Color(0xFF7209B7); // Royal Purple
 
   // Low stock severity
   static const Color criticalStock = Color(0xFFBA1A1A);
