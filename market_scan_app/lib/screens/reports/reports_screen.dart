@@ -383,13 +383,25 @@ class _ReportsScreenState extends State<ReportsScreen>
     );
   }
 
+  Color _getCategoryColor(String name) {
+    if (name.isEmpty || name == 'عام' || name == 'أخرى') {
+      if (name == 'عام') return AppColors.chart1;
+      return AppColors.chart5;
+    }
+    final int hash = name.hashCode;
+    final double hue = (hash.abs() % 360).toDouble();
+    final double saturation = 0.70 + (hash.abs() % 15) / 100.0;
+    final double lightness = 0.45 + (hash.abs() % 12) / 100.0;
+    return HSLColor.fromAHSL(1.0, hue, saturation, lightness).toColor();
+  }
+
   List<PieChartSectionData> _buildPieSections(List<dynamic> catAggList) {
-    final colors = [AppColors.chart1, AppColors.chart2, AppColors.chart3, AppColors.chart4, AppColors.chart5];
-    return catAggList.asMap().entries.map((e) {
-      final double val = double.tryParse(e.value['count']?.toString() ?? '1.0') ?? 1.0;
+    return catAggList.map((e) {
+      final name = e['_id'] ?? 'عام';
+      final double val = double.tryParse(e['count']?.toString() ?? '1.0') ?? 1.0;
       return PieChartSectionData(
         value: val,
-        color: colors[e.key % colors.length],
+        color: _getCategoryColor(name),
         showTitle: false,
         radius: 30,
       );
@@ -397,13 +409,12 @@ class _ReportsScreenState extends State<ReportsScreen>
   }
 
   List<Widget> _buildPieLegends(List<dynamic> catAggList) {
-    final colors = [AppColors.chart1, AppColors.chart2, AppColors.chart3, AppColors.chart4, AppColors.chart5];
     if (catAggList.isEmpty) {
       return [const _Legend('لا يوجد', AppColors.chart1)];
     }
-    return catAggList.asMap().entries.take(5).map((e) {
-      final name = e.value['_id'] ?? 'عام';
-      return _Legend(name, colors[e.key % colors.length]);
+    return catAggList.take(5).map((e) {
+      final name = e['_id'] ?? 'عام';
+      return _Legend(name, _getCategoryColor(name));
     }).toList();
   }
 }
