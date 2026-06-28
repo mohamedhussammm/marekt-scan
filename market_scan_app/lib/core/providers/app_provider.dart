@@ -24,6 +24,7 @@ class AppProvider extends ChangeNotifier {
   final List<Product> _products = [];
   final List<Sale> _sales = [];
   final List<CartItem> _cart = [];
+  final List<Customer> _customers = [];
 
   // Cached filters for blazing fast list rendering
   List<Product> _filteredProductsCache = [];
@@ -70,6 +71,7 @@ class AppProvider extends ChangeNotifier {
   List<Product> get products => List.unmodifiable(_products);
   List<Sale> get sales => List.unmodifiable(_sales);
   List<CartItem> get cart => List.unmodifiable(_cart);
+  List<Customer> get customers => List.unmodifiable(_customers);
   bool get isLoggedIn => _isLoggedIn;
   bool get isLoading => _isLoading;
 
@@ -158,6 +160,7 @@ class AppProvider extends ChangeNotifier {
           loadSettings(),
           loadDashboardStats(),
           loadActiveShift(),
+          loadCustomers(),
         ]).catchError((err) {
           debugPrint('Background login loading error: $err');
           return <void>[];
@@ -223,6 +226,7 @@ class AppProvider extends ChangeNotifier {
           loadSettings(),
           loadDashboardStats(),
           loadActiveShift(),
+          loadCustomers(),
         ]);
 
         _storeName = userData['storeName'] ?? storeName;
@@ -261,6 +265,8 @@ class AppProvider extends ChangeNotifier {
     ApiService.clearToken();
     _db.clearAllProducts(); // Clear SQLite cache to isolate data
     _db.clearAllTransactions(); // Clear local transactions cache on logout for privacy/isolation
+    _db.clearAllCustomers();
+    _customers.clear();
     _updateFilterCaches();
     notifyListeners();
   }
@@ -289,6 +295,98 @@ class AppProvider extends ChangeNotifier {
     _updateFilterCaches();
     _isLoading = false;
     notifyListeners(); // Single notification with final state
+  }
+
+  Future<void> loadCustomers() async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final res = await _api.getAllCustomers();
+      if (res['success'] == true) {
+        final List<dynamic> list = res['customers'] ?? [];
+        final fetched = list.map((json) => Customer.fromJson(json)).toList();
+        _customers.clear();
+        _customers.addAll(fetched);
+
+        // Sync local SQLite with remote
+        await _db.clearAllCustomers();
+        await _db.insertCustomersBatch(fetched);
+      } else {
+        // Fallback to SQLite
+        final cached = await _db.getAllCustomers();
+        _customers.clear();
+        _customers.addAll(cached);
+      }
+    } catch (e) {
+      debugPrint('Error loadCustomers: $e');
+      final cached = await _db.getAllCustomers();
+      _customers.clear();
+      _customers.addAll(cached);
+    }
+
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<Customer?> getCustomerById(String customerId) async {
+    final memIdx = _customers.indexWhere((c) => c.customerId == customerId);
+    if (memIdx >= 0) return _customers[memIdx];
+    return await _db.getCustomerById(customerId);
+  }
+
+  Future<bool> addCustomer({
+    required String fullName,
+    String? phoneNumber,
+    String? address,
+  }) async {
+    final customerId = 'CUST-${DateTime.now().millisecondsSinceEpoch}';
+    final customer = Customer(
+      id: customerId,
+      customerId: customerId,
+      fullName: fullName,
+      phoneNumber: phoneNumber,
+      address: address,
+    );
+
+    // Optimistic local update (Instant UI response)
+    _customers.insert(0, customer);
+    await _db.insertCustomer(customer);
+    notifyListeners();
+
+    // Perform API call in background with a quick timeout fallback
+    _api.createCustomer(customer).timeout(const Duration(seconds: 2)).then((res) async {
+      if (res['success'] != true) {
+        await _syncEngine.enqueue('add_customer', customer.toJson());
+      }
+    }).catchError((e) async {
+      debugPrint('Error creating customer on server, queuing offline: $e');
+      await _syncEngine.enqueue('add_customer', customer.toJson());
+    });
+
+    return true;
+  }
+
+  Future<bool> editCustomer(Customer customer) async {
+    // Optimistic local update (Instant UI response)
+    final index = _customers.indexWhere((c) => c.customerId == customer.customerId);
+    if (index >= 0) {
+      _customers[index] = customer;
+    }
+    await _db.insertCustomer(customer);
+    notifyListeners();
+
+    // Perform API call in background with a quick timeout fallback
+    _api.updateCustomer(customer).timeout(const Duration(seconds: 2)).then((res) async {
+      if (res['success'] != true) {
+        await _syncEngine.enqueue('add_customer', customer.toJson());
+      }
+    }).catchError((e) async {
+      debugPrint('Error updating customer on server, queuing offline: $e');
+      await _syncEngine.enqueue('add_customer', customer.toJson());
+    });
+
+    return true;
   }
 
   Future<void> loadDashboardStats({bool rethrowNetworkErrors = false}) async {
@@ -519,6 +617,118 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<List<Sale>> getCustomerHistory(String customerId) async {
+    final List<Sale> list = [];
+
+    // 1. First, load offline transactions for this customer from local SQLite database
+    try {
+      final localTxList = await _db.getLocalTransactionsForCustomer(customerId);
+      for (final tx in localTxList) {
+        try {
+          final List<dynamic> itemsData = jsonDecode(tx['items_json'] as String);
+          final items = itemsData.map((it) {
+            final double price = (it['unitPrice'] ?? 0.0).toDouble();
+            final int qty = (it['qty'] ?? 1).toInt();
+            return CartItem(
+              product: findByBarcode(it['barcodeId']) ?? Product(
+                id: it['barcodeId'] ?? 'item',
+                barcode: it['barcodeId'] ?? 'item',
+                name: it['name'] ?? '',
+                category: 'عام',
+                costPrice: price * 0.7,
+                sellingPrice: price,
+                stockQuantity: 100,
+                minStockLevel: 10,
+              ),
+              quantity: qty,
+            );
+          }).toList();
+
+          list.add(Sale(
+            id: tx['id'],
+            receiptNumber: tx['receipt_number'] ?? 'INV-معلق',
+            items: items,
+            subtotal: (tx['total_amount'] ?? 0.0).toDouble(),
+            discount: 0,
+            tax: 0,
+            total: (tx['total_amount'] ?? 0.0).toDouble(),
+            amountPaid: (tx['amount_paid'] ?? tx['total_amount'] ?? 0.0).toDouble(),
+            paymentMethod: tx['payment_method'] ?? 'نقداً',
+            createdAt: DateTime.parse(tx['created_at']),
+            type: tx['type'] ?? 'sale',
+            cashierName: tx['cashier_name'] ?? 'أوفلاين',
+            isOffline: tx['is_offline'] == 1,
+            customerId: tx['customer_id'],
+            changeReturned: (tx['change_returned'] ?? 0.0).toDouble(),
+          ));
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('Error getLocalTransactionsForCustomer: $e');
+    }
+
+    // 2. Fetch server transactions for this customer and merge them
+    try {
+      final res = await _api.getCustomerHistory(customerId).timeout(const Duration(seconds: 5));
+      if (res['success'] == true) {
+        final List<dynamic> historyData = res['history'] ?? [];
+        for (final tx in historyData) {
+          final offlineId = tx['offlineId'] ?? tx['offline_id'];
+
+          // Remove duplicate locally stored transaction if exists
+          list.removeWhere((s) {
+            if (s.id == tx['_id']) return true;
+            if (offlineId != null && s.id == offlineId) return true;
+            if (tx['receiptNumber'] != null && s.receiptNumber == tx['receiptNumber']) return true;
+            return false;
+          });
+
+          final List<dynamic> itemsData = tx['items'] ?? [];
+          final items = itemsData.map((it) {
+            final productData = it['product'];
+            final double price = (it['price'] ?? 0.0).toDouble();
+            return CartItem(
+              product: Product(
+                id: productData?['_id'] ?? 'item',
+                barcode: productData?['barcode'] ?? 'item',
+                name: productData?['name'] ?? '',
+                category: productData?['category'] ?? 'عام',
+                costPrice: (productData?['costPrice'] ?? price * 0.7).toDouble(),
+                sellingPrice: price,
+                stockQuantity: (productData?['stockQuantity'] ?? 100).toInt(),
+                minStockLevel: (productData?['minStockLevel'] ?? 10).toInt(),
+              ),
+              quantity: (it['quantity'] ?? 1).toInt(),
+            );
+          }).toList();
+
+          list.add(Sale(
+            id: tx['_id'],
+            receiptNumber: tx['receiptNumber'] ?? 'REC-000',
+            items: items,
+            subtotal: (tx['subtotal'] ?? tx['total'] ?? 0.0).toDouble(),
+            discount: (tx['discount'] ?? 0.0).toDouble(),
+            tax: (tx['tax'] ?? 0.0).toDouble(),
+            total: (tx['total'] ?? 0.0).toDouble(),
+            amountPaid: (tx['amountPaid'] ?? tx['total'] ?? 0.0).toDouble(),
+            paymentMethod: tx['paymentMethod'] ?? 'cash',
+            createdAt: DateTime.parse(tx['createdAt']),
+            type: 'sale',
+            cashierName: tx['cashierName'],
+            isOffline: false,
+            customerId: customerId,
+            changeReturned: (tx['changeReturned'] ?? 0.0).toDouble(),
+          ));
+        }
+      }
+    } catch (e) {
+      debugPrint('Error getCustomerHistory online lookup: $e');
+    }
+
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return list;
+  }
+
   Future<void> _loadSalesFromLocalCache() async {
     try {
       final localTxList = await _db.getLocalTransactions(limit: 10, skip: 0);
@@ -660,11 +870,17 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Sale?> completeSale(String paymentMethod, double amountPaid) async {
+  Future<Sale?> completeSale(
+    String paymentMethod,
+    double amountPaid, {
+    String? customerId,
+    double? changeReturned,
+  }) async {
     if (_cart.isEmpty) return null;
 
     final receiptNumber = 'INV-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
     final offlineId = const Uuid().v4();
+    final double finalChangeReturned = changeReturned ?? (amountPaid - cartTotal);
     
     final itemsPayload = _cart.map((i) {
       return {
@@ -680,7 +896,10 @@ class AppProvider extends ChangeNotifier {
       'offline_id': offlineId,
       'items': itemsPayload,
       'totalAmount': cartTotal,
+      'amountPaid': amountPaid,
       'paymentMethod': paymentMethod,
+      if (customerId != null) 'customerId': customerId,
+      'changeReturned': finalChangeReturned,
     };
 
     final sale = Sale(
@@ -694,6 +913,8 @@ class AppProvider extends ChangeNotifier {
       amountPaid: amountPaid,
       paymentMethod: paymentMethod,
       createdAt: DateTime.now(),
+      customerId: customerId,
+      changeReturned: finalChangeReturned,
     );
 
     // Decrement stock levels locally
@@ -926,6 +1147,84 @@ class AppProvider extends ChangeNotifier {
       }
     } catch (e) {
       await _syncEngine.enqueue('add_expense', payload);
+      return {'success': true, 'isOffline': true};
+    }
+  }
+
+  Future<Map<String, dynamic>> editPettyExpense(PettyExpense expense, double amount, String description, String category) async {
+    if (expense.isOffline) {
+      await _db.updateOfflineExpense(expense.id, amount, description, category);
+      loadDashboardStats();
+      notifyListeners();
+      return {'success': true, 'isOffline': true};
+    }
+
+    try {
+      final res = await _api.editExpense(expense.id, amount, description, category).timeout(const Duration(seconds: 4));
+      if (res['success'] == true) {
+        loadDashboardStats();
+        notifyListeners();
+        return {'success': true, 'isOffline': false};
+      } else {
+        final offlineId = const Uuid().v4();
+        await _syncEngine.enqueue('edit_expense', {
+          'id': expense.id,
+          'amount': amount,
+          'description': description,
+          'category': category,
+          'offline_id': offlineId,
+        });
+        loadDashboardStats();
+        notifyListeners();
+        return {'success': true, 'isOffline': true};
+      }
+    } catch (e) {
+      final offlineId = const Uuid().v4();
+      await _syncEngine.enqueue('edit_expense', {
+        'id': expense.id,
+        'amount': amount,
+        'description': description,
+        'category': category,
+        'offline_id': offlineId,
+      });
+      loadDashboardStats();
+      notifyListeners();
+      return {'success': true, 'isOffline': true};
+    }
+  }
+
+  Future<Map<String, dynamic>> deletePettyExpense(PettyExpense expense) async {
+    if (expense.isOffline) {
+      await _db.deleteOfflineExpense(expense.id);
+      loadDashboardStats();
+      notifyListeners();
+      return {'success': true, 'isOffline': true};
+    }
+
+    try {
+      final res = await _api.deleteExpense(expense.id).timeout(const Duration(seconds: 4));
+      if (res['success'] == true) {
+        loadDashboardStats();
+        notifyListeners();
+        return {'success': true, 'isOffline': false};
+      } else {
+        final offlineId = const Uuid().v4();
+        await _syncEngine.enqueue('delete_expense', {
+          'id': expense.id,
+          'offline_id': offlineId,
+        });
+        loadDashboardStats();
+        notifyListeners();
+        return {'success': true, 'isOffline': true};
+      }
+    } catch (e) {
+      final offlineId = const Uuid().v4();
+      await _syncEngine.enqueue('delete_expense', {
+        'id': expense.id,
+        'offline_id': offlineId,
+      });
+      loadDashboardStats();
+      notifyListeners();
       return {'success': true, 'isOffline': true};
     }
   }

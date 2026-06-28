@@ -5,6 +5,7 @@ const Expense = require('../models/Expense');
 const Product = require('../models/Product');
 const StoreInventory = require('../models/StoreInventory');
 const Shift = require('../models/Shift');
+const Customer = require('../models/Customer');
 const salesController = require('../controllers/salesController');
 
 router.post('/batch', async (req, res) => {
@@ -75,6 +76,15 @@ async function processOperation(op, req) {
     case 'update_stock':
       await processStockUpdate(payload, req);
       break;
+
+    case 'add_customer':
+      return await processCustomer(payload, req);
+
+    case 'edit_expense':
+      return await processEditExpense(payload, req);
+
+    case 'delete_expense':
+      return await processDeleteExpense(payload, req);
 
     default:
       throw new Error(`Unknown operation type: ${type}`);
@@ -150,6 +160,55 @@ async function processStockUpdate(payload, req) {
     { $inc: { currentStock: quantity } },
     { new: true, upsert: true }
   );
+}
+
+async function processCustomer(payload, req) {
+  const { customerId, fullName, phoneNumber, address } = payload;
+  if (!customerId || !fullName) {
+    throw new Error('معرف العميل والاسم الكامل مطلوبان');
+  }
+
+  const existing = await Customer.findOne({ customerId });
+  if (existing) return existing;
+
+  const customer = new Customer({
+    storeName: req.storeName,
+    customerId,
+    fullName: fullName.trim(),
+    phoneNumber: phoneNumber ? phoneNumber.trim() : '',
+    address: address ? address.trim() : ''
+  });
+
+  await customer.save();
+  return customer;
+}
+
+async function processEditExpense(payload, req) {
+  const { id, offline_id, amount, description, category } = payload;
+  let expense;
+  if (id) {
+    expense = await Expense.findOne({ _id: id, storeName: req.storeName });
+  } else if (offline_id) {
+    expense = await Expense.findOne({ offline_id, storeName: req.storeName });
+  }
+  
+  if (expense) {
+    expense.amount = parseFloat(amount);
+    expense.description = description.trim();
+    expense.category = category || 'أخرى';
+    await expense.save();
+  }
+  return expense;
+}
+
+async function processDeleteExpense(payload, req) {
+  const { id, offline_id } = payload;
+  if (id) {
+    await Expense.findOneAndDelete({ _id: id, storeName: req.storeName });
+  } else if (offline_id) {
+    await Expense.findOneAndDelete({ offline_id, storeName: req.storeName });
+  }
+  return null;
 }
 
 module.exports = router;

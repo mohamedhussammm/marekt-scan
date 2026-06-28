@@ -15,7 +15,9 @@ const transactionSchema = new mongoose.Schema({
   amountPaid: { type: Number },
   paymentMethod: { type: String, required: true },
   shiftId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shift' },
-  cashierName: { type: String, default: 'المدير' }
+  cashierName: { type: String, default: 'المدير' },
+  customerId: { type: String, index: true },
+  changeReturned: { type: Number, default: 0 }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Transaction', transactionSchema);

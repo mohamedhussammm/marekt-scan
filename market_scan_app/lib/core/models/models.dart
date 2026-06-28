@@ -113,6 +113,8 @@ class Sale {
   final String type; // 'sale' or 'expense'
   final String? cashierName;
   bool isOffline;
+  final String? customerId;
+  final double? changeReturned;
 
   Sale({
     required this.id,
@@ -128,9 +130,11 @@ class Sale {
     this.type = 'sale',
     this.cashierName,
     this.isOffline = false,
+    this.customerId,
+    this.changeReturned,
   });
 
-  double get change => amountPaid - total;
+  double get change => changeReturned ?? (amountPaid - total);
 }
 
 class SalesSummary {
@@ -266,4 +270,56 @@ class OfflineQueueItem {
     this.retries = 0,
     this.status = 'pending',
   });
+}
+
+class Customer {
+  final String id;
+  final String customerId;
+  final String fullName;
+  final String? phoneNumber;
+  final String? address;
+
+  Customer({
+    required this.id,
+    required this.customerId,
+    required this.fullName,
+    this.phoneNumber,
+    this.address,
+  });
+
+  factory Customer.fromJson(Map<String, dynamic> json) {
+    return Customer(
+      id: json['id'] ?? json['_id'] ?? json['customerId'] ?? '',
+      customerId: json['customerId'] ?? json['customer_id'] ?? '',
+      fullName: json['fullName'] ?? json['full_name'] ?? '',
+      phoneNumber: json['phoneNumber'] ?? json['phone_number'],
+      address: json['address'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'customerId': customerId,
+      'fullName': fullName,
+      'phoneNumber': phoneNumber,
+      'address': address,
+    };
+  }
+
+  Customer copyWith({
+    String? id,
+    String? customerId,
+    String? fullName,
+    String? phoneNumber,
+    String? address,
+  }) {
+    return Customer(
+      id: id ?? this.id,
+      customerId: customerId ?? this.customerId,
+      fullName: fullName ?? this.fullName,
+      phoneNumber: phoneNumber ?? this.phoneNumber,
+      address: address ?? this.address,
+    );
+  }
 }

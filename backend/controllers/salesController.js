@@ -7,7 +7,7 @@ const Settings = require('../models/Settings');
 
 exports.createTransaction = async (req, res) => {
   try {
-    const { items, totalAmount, amountPaid, paymentMethod, offline_id } = req.body;
+    const { items, totalAmount, amountPaid, paymentMethod, offline_id, customerId, changeReturned } = req.body;
 
     // ── INPUT VALIDATION ──────────────────────────────────────────────────
     if (!Array.isArray(items) || items.length === 0) {
@@ -126,7 +126,9 @@ exports.createTransaction = async (req, res) => {
       amountPaid: amountPaid !== undefined ? amountPaid : totalAmount,
       paymentMethod,
       shiftId: activeShift ? activeShift._id : undefined,
-      cashierName: req.userRole === 'admin' ? 'المدير' : (req.username || 'المدير')
+      cashierName: req.userRole === 'admin' ? 'المدير' : (req.username || 'المدير'),
+      customerId: customerId || undefined,
+      changeReturned: changeReturned || 0
     });
 
     // 4. Increment active shift metrics

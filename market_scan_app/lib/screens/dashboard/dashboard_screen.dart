@@ -279,36 +279,47 @@ class _DashboardScreenState extends State<DashboardScreen>
                       Text(AppStrings.quickActions,
                           style: Theme.of(context).textTheme.titleLarge),
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          _GlassQuickAction(
-                            icon: Icons.point_of_sale,
-                            label: AppStrings.pos,
-                            color: AppColors.primary,
-                            onTap: () => Navigator.pushNamed(context, '/pos'),
-                          ),
-                          const SizedBox(width: 10),
-                          _GlassQuickAction(
-                            icon: Icons.add_box_outlined,
-                            label: AppStrings.stockIn,
-                            color: AppColors.success,
-                            onTap: () => Navigator.pushNamed(context, '/inventory'),
-                          ),
-                          const SizedBox(width: 10),
-                          _GlassQuickAction(
-                            icon: Icons.bar_chart,
-                            label: AppStrings.reports,
-                            color: AppColors.info,
-                            onTap: () => Navigator.pushNamed(context, '/reports'),
-                          ),
-                          const SizedBox(width: 10),
-                          _GlassQuickAction(
-                            icon: Icons.notification_important_outlined,
-                            label: 'التنبيهات',
-                            color: AppColors.warning,
-                            onTap: () => Navigator.pushNamed(context, '/alerts'),
-                          ),
-                        ],
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        child: Row(
+                          children: [
+                            _GlassQuickAction(
+                              icon: Icons.point_of_sale,
+                              label: AppStrings.pos,
+                              color: AppColors.primary,
+                              onTap: () => Navigator.pushNamed(context, '/pos'),
+                            ),
+                            const SizedBox(width: 10),
+                            _GlassQuickAction(
+                              icon: Icons.people_outline,
+                              label: 'العملاء',
+                              color: AppColors.accentGlow,
+                              onTap: () => Navigator.pushNamed(context, '/customers'),
+                            ),
+                            const SizedBox(width: 10),
+                            _GlassQuickAction(
+                              icon: Icons.add_box_outlined,
+                              label: AppStrings.stockIn,
+                              color: AppColors.success,
+                              onTap: () => Navigator.pushNamed(context, '/inventory'),
+                            ),
+                            const SizedBox(width: 10),
+                            _GlassQuickAction(
+                              icon: Icons.bar_chart,
+                              label: AppStrings.reports,
+                              color: AppColors.info,
+                              onTap: () => Navigator.pushNamed(context, '/reports'),
+                            ),
+                            const SizedBox(width: 10),
+                            _GlassQuickAction(
+                              icon: Icons.notification_important_outlined,
+                              label: 'التنبيهات',
+                              color: AppColors.warning,
+                              onTap: () => Navigator.pushNamed(context, '/alerts'),
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 20),
 
@@ -500,7 +511,8 @@ class _GlassQuickAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
+    return SizedBox(
+      width: 82,
       child: GestureDetector(
         onTap: onTap,
         child: GlassPanel(
@@ -624,7 +636,7 @@ class _GlassTransactionTile extends StatelessWidget {
                     content: Text(
                       'الوصف: ${sale.items.isNotEmpty ? sale.items.first.product.name : "-"}\n'
                       'المبلغ: ${sale.total.toStringAsFixed(2)} ${AppStrings.currencySymbol}\n'
-                      'الوقت: ${DateFormat('yyyy-MM-dd hh:mm a').format(sale.createdAt)}',
+                      'الوقت: ${DateFormat('yyyy-MM-dd hh:mm a', 'ar').format(sale.createdAt)}',
                       style: const TextStyle(fontFamily: 'Cairo', height: 1.6,
                           color: AppColors.textSecondary),
                     ),

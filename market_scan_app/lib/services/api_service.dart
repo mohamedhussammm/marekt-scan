@@ -285,6 +285,37 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> editExpense(String id, double amount, String description, String category) async {
+    try {
+      final response = await _client.put(
+        Uri.parse('$baseUrl/expenses/$id'),
+        headers: _headers(true),
+        body: json.encode({
+          'amount': amount,
+          'description': description,
+          'category': category,
+        }),
+      );
+      return json.decode(response.body);
+    } catch (e) {
+      debugPrint('API Error (editExpense): $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteExpense(String id) async {
+    try {
+      final response = await _client.delete(
+        Uri.parse('$baseUrl/expenses/$id'),
+        headers: _headers(true),
+      );
+      return json.decode(response.body);
+    } catch (e) {
+      debugPrint('API Error (deleteExpense): $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
   // ─── SECURITY AUDITING API CALLS ───
   Future<void> reportSecurityViolation(String action, String details) async {
     try {
@@ -630,6 +661,61 @@ class ApiService {
       return json.decode(response.body);
     } catch (e) {
       debugPrint('API Error (syncBatch): $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  // ─── CUSTOMER MANAGEMENT API CALLS ───
+  Future<Map<String, dynamic>> getAllCustomers() async {
+    try {
+      final response = await _client.get(
+        Uri.parse('$baseUrl/customers'),
+        headers: _headers(),
+      );
+      return json.decode(response.body);
+    } catch (e) {
+      debugPrint('API Error (getAllCustomers): $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> createCustomer(Customer customer) async {
+    try {
+      final response = await _client.post(
+        Uri.parse('$baseUrl/customers'),
+        headers: _headers(true),
+        body: json.encode(customer.toJson()),
+      );
+      return json.decode(response.body);
+    } catch (e) {
+      debugPrint('API Error (createCustomer): $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateCustomer(Customer customer) async {
+    try {
+      final response = await _client.put(
+        Uri.parse('$baseUrl/customers/${customer.customerId}'),
+        headers: _headers(true),
+        body: json.encode(customer.toJson()),
+      );
+      return json.decode(response.body);
+    } catch (e) {
+      debugPrint('API Error (updateCustomer): $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> getCustomerHistory(String customerId) async {
+    try {
+      final response = await _client.get(
+        Uri.parse('$baseUrl/customers/$customerId/history'),
+        headers: _headers(),
+      );
+      return json.decode(response.body);
+    } catch (e) {
+      debugPrint('API Error (getCustomerHistory): $e');
       return {'success': false, 'error': e.toString()};
     }
   }

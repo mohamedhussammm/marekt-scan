@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/models/models.dart';
@@ -325,9 +326,84 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
     });
   }
 
+  Future<Customer?> _showQuickAddCustomerDialog(BuildContext context) async {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final addrCtrl = TextEditingController();
+    bool isSaving = false;
+
+    return showDialog<Customer>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            title: const Text('إضافة عميل جديد', style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'الاسم الكامل'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(labelText: 'رقم الهاتف'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: addrCtrl,
+                    decoration: const InputDecoration(labelText: 'العنوان'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('إلغاء', style: TextStyle(fontFamily: 'Cairo')),
+              ),
+              ElevatedButton(
+                onPressed: isSaving ? null : () async {
+                  final name = nameCtrl.text.trim();
+                  if (name.isEmpty) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(content: Text('الرجاء إدخال الاسم')),
+                    );
+                    return;
+                  }
+                  setDialogState(() => isSaving = true);
+                  final appProvider = context.read<AppProvider>();
+                  final success = await appProvider.addCustomer(
+                    fullName: name,
+                    phoneNumber: phoneCtrl.text.trim().isEmpty ? null : phoneCtrl.text.trim(),
+                    address: addrCtrl.text.trim().isEmpty ? null : addrCtrl.text.trim(),
+                  );
+                  if (ctx.mounted) {
+                    if (success && appProvider.customers.isNotEmpty) {
+                      Navigator.pop(ctx, appProvider.customers.first);
+                    } else {
+                      Navigator.pop(ctx, null);
+                    }
+                  }
+                },
+                child: isSaving
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('حفظ', style: TextStyle(fontFamily: 'Cairo')),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   void _showCheckoutDialog(BuildContext context, ScanningController scanner) {
     String paymentMethod = 'نقداً';
     _amountCtrl.text = scanner.totalAmount.toStringAsFixed(2);
+    String? selectedCustomerId;
 
     showModalBottomSheet(
       context: context,
@@ -340,6 +416,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
           builder: (ctx, setModalState) {
             final double amountPaid = double.tryParse(_amountCtrl.text) ?? scanner.totalAmount;
             final double change = amountPaid - scanner.totalAmount;
+            final customers = Provider.of<AppProvider>(ctx).customers;
 
             return Padding(
               padding: EdgeInsets.fromLTRB(
@@ -367,6 +444,56 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                   _SummaryRow('الإجمالي',
                       '${scanner.totalAmount.toStringAsFixed(2)} ${AppStrings.currencySymbol}',
                       bold: true, color: AppColors.primary),
+                  const SizedBox(height: 16),
+                  Text('العميل',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String?>(
+                    value: selectedCustomerId,
+                    hint: const Text('بدون عميل', style: TextStyle(fontFamily: 'Cairo', fontSize: 13)),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.person_outline, color: AppColors.primary),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('بدون عميل', style: TextStyle(fontFamily: 'Cairo', fontSize: 13)),
+                      ),
+                      ...customers.map((c) => DropdownMenuItem<String?>(
+                        value: c.customerId,
+                        child: Text(c.fullName, style: const TextStyle(fontFamily: 'Cairo', fontSize: 13)),
+                      )),
+                      const DropdownMenuItem<String?>(
+                        value: 'ADD_NEW_CUSTOMER_ACTION',
+                        child: Row(
+                          children: [
+                            Icon(Icons.add, color: AppColors.primary, size: 18),
+                            SizedBox(width: 8),
+                            Text('إضافة عميل جديد...', style: TextStyle(fontFamily: 'Cairo', color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ],
+                    onChanged: (val) async {
+                      if (val == 'ADD_NEW_CUSTOMER_ACTION') {
+                        final newCust = await _showQuickAddCustomerDialog(ctx);
+                        if (newCust != null) {
+                          setModalState(() {
+                            selectedCustomerId = newCust.customerId;
+                          });
+                        } else {
+                          setModalState(() {
+                            selectedCustomerId = null;
+                          });
+                        }
+                      } else {
+                        setModalState(() {
+                          selectedCustomerId = val;
+                        });
+                      }
+                    },
+                  ),
                   const SizedBox(height: 16),
                   Text('طريقة الدفع',
                       style: Theme.of(context).textTheme.titleMedium),
@@ -429,6 +556,8 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                               final result = await scanner.checkout(
                                 paymentMethod,
                                 amountPaid: amountPaid,
+                                customerId: selectedCustomerId,
+                                changeReturned: change >= 0 ? change : 0.0,
                                 onSaleCreated: (sale) {
                                   if (context.mounted) {
                                     context.read<AppProvider>().addLocalSale(sale);
@@ -439,7 +568,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                               Navigator.pop(ctx);
                               if (result['success'] == true) {
                                 if (context.mounted) {
-                                  context.read<AppProvider>().loadDashboardStats();
+                                    context.read<AppProvider>().loadDashboardStats();
                                 }
                                 final isOffline = result['isOffline'] == true;
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -978,7 +1107,7 @@ class _PosScannerScreenState extends State<PosScannerScreen> {
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (itemCtx, index) {
                     final order = heldOrders[index];
-                    final dateStr = '${order.timestamp.hour.toString().padLeft(2, '0')}:${order.timestamp.minute.toString().padLeft(2, '0')}';
+                    final dateStr = DateFormat('hh:mm a', 'ar').format(order.timestamp.toLocal());
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(

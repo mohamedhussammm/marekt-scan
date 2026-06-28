@@ -147,6 +147,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _SettingsGroup(
                       title: 'إعدادات التطبيق',
                       children: [
+                        _SettingsTile(
+                          icon: Icons.people_outline,
+                          title: 'إدارة العملاء',
+                          subtitle: 'قائمة العملاء وسجل المشتريات والمدفوعات',
+                          onTap: () => Navigator.pushNamed(context, '/customers'),
+                        ),
                         Selector<AppProvider, bool>(
                           selector: (_, p) => p.notificationsEnabled,
                           builder: (context, notificationsEnabled, __) =>

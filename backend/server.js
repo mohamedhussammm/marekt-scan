@@ -13,6 +13,7 @@ const shiftsRoute = require('./routes/shifts');
 const expensesRoute = require('./routes/expenses');
 const logsRoute = require('./routes/logs');
 const syncRoute = require('./routes/sync');
+const customersRoute = require('./routes/customers');
 
 const app = express();
 
@@ -59,6 +60,7 @@ app.use('/api/shifts', shiftsRoute);
 app.use('/api/expenses', expensesRoute);
 app.use('/api/logs', logsRoute);
 app.use('/api/sync', syncRoute);
+app.use('/api/customers', customersRoute);
 
 // Local development only — Vercel handles the HTTP server in production
 if (require.main === module) {

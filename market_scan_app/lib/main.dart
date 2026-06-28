@@ -16,6 +16,7 @@ import 'screens/alerts/low_stock_alerts_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/register/register_screen.dart';
 import 'screens/transactions/transaction_history_screen.dart';
+import 'screens/customers/customers_screen.dart';
 import 'widgets/main_navigation.dart';
 import 'services/api_service.dart';
 import 'services/sync_engine.dart';
@@ -75,6 +76,7 @@ class MarketScanApp extends StatelessWidget {
         '/alerts': (_) => const LowStockAlertsScreen(),
         '/settings': (_) => const SettingsScreen(),
         '/transactions-history': (_) => const TransactionHistoryScreen(),
+        '/customers': (_) => const CustomersScreen(),
       },
     );
   }

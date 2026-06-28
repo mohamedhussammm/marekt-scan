@@ -6,6 +6,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'db_helper.dart';
 import 'api_service.dart';
 import '../core/models/models.dart';
+import 'package:uuid/uuid.dart';
 
 class SyncEngine extends ChangeNotifier {
   static final SyncEngine instance = SyncEngine._internal();
@@ -78,7 +79,13 @@ class SyncEngine extends ChangeNotifier {
   }
 
   Future<void> enqueue(String operation, Map<String, dynamic> payload) async {
-    final offlineId = payload['offline_id'] as String;
+    String offlineId;
+    if (payload['offline_id'] != null) {
+      offlineId = payload['offline_id'].toString();
+    } else {
+      offlineId = const Uuid().v4();
+      payload['offline_id'] = offlineId;
+    }
     await _db.insertOfflineOp(offlineId, operation, payload);
     _pendingCount = await _db.getPendingCount();
     notifyListeners();
@@ -206,6 +213,8 @@ class SyncEngine extends ChangeNotifier {
         type: 'sale',
         createdAt: DateTime.now(),
         isOffline: false,
+        customerId: payload['customerId'] as String?,
+        changeReturned: payload['changeReturned'] != null ? (payload['changeReturned'] as num).toDouble() : null,
       );
     } catch (e) {
       debugPrint('Failed to cache synced checkout: $e');

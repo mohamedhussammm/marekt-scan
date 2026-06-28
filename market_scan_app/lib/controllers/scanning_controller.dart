@@ -251,13 +251,20 @@ class ScanningController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Map<String, dynamic>> checkout(String paymentMethod, {double? amountPaid, void Function(Sale)? onSaleCreated}) async {
+  Future<Map<String, dynamic>> checkout(
+    String paymentMethod, {
+    double? amountPaid,
+    String? customerId,
+    double? changeReturned,
+    void Function(Sale)? onSaleCreated,
+  }) async {
     if (cartItems.isEmpty) return {'success': false, 'error': 'Cart is empty'};
 
     final offlineId = const Uuid().v4();
     final List<CartItem> clonedCart = List<CartItem>.from(cartItems);
     final double finalTotalAmount = totalAmount; // Store total before clearing cart
     final double finalAmountPaid = amountPaid ?? finalTotalAmount;
+    final double finalChangeReturned = changeReturned ?? (finalAmountPaid - finalTotalAmount);
 
     final itemsPayload = cartItems
         .map((i) {
@@ -277,6 +284,8 @@ class ScanningController extends ChangeNotifier {
       'totalAmount': finalTotalAmount,
       'amountPaid': finalAmountPaid,
       'paymentMethod': paymentMethod,
+      if (customerId != null) 'customerId': customerId,
+      'changeReturned': finalChangeReturned,
     };
 
     // Optimistically clear cart
@@ -302,6 +311,8 @@ class ScanningController extends ChangeNotifier {
           type: 'sale',
           createdAt: DateTime.now(),
           isOffline: false,
+          customerId: customerId,
+          changeReturned: finalChangeReturned,
         );
 
         if (onSaleCreated != null) {
@@ -319,6 +330,8 @@ class ScanningController extends ChangeNotifier {
             type: 'sale',
             cashierName: realCashierName,
             isOffline: false,
+            customerId: customerId,
+            changeReturned: finalChangeReturned,
           );
           onSaleCreated(sale);
         }
@@ -337,6 +350,8 @@ class ScanningController extends ChangeNotifier {
           type: 'sale',
           createdAt: DateTime.now(),
           isOffline: true,
+          customerId: customerId,
+          changeReturned: finalChangeReturned,
         );
 
         if (onSaleCreated != null) {
@@ -354,6 +369,8 @@ class ScanningController extends ChangeNotifier {
             type: 'sale',
             cashierName: 'أوفلاين',
             isOffline: true,
+            customerId: customerId,
+            changeReturned: finalChangeReturned,
           );
           onSaleCreated(sale);
         }
@@ -373,6 +390,8 @@ class ScanningController extends ChangeNotifier {
         type: 'sale',
         createdAt: DateTime.now(),
         isOffline: true,
+        customerId: customerId,
+        changeReturned: finalChangeReturned,
       );
 
       if (onSaleCreated != null) {
@@ -390,6 +409,8 @@ class ScanningController extends ChangeNotifier {
           type: 'sale',
           cashierName: 'أوفلاين',
           isOffline: true,
+          customerId: customerId,
+          changeReturned: finalChangeReturned,
         );
         onSaleCreated(sale);
       }

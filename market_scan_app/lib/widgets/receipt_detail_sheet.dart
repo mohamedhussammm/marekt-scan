@@ -169,6 +169,16 @@ class ReceiptDetailSheet extends StatelessWidget {
                                 _buildMetaRow('طريقة الدفع:', sale.paymentMethod == 'cash' || sale.paymentMethod == 'نقداً' ? 'نقداً 💵' : 'بطاقة ائتمان 💳'),
                                 const SizedBox(height: 8),
                                 _buildMetaRow('حالة الفاتورة:', 'مكتملة ✅', isGreenValue: true),
+                                if (sale.customerId != null) ...[
+                                  const SizedBox(height: 8),
+                                  FutureBuilder<Customer?>(
+                                    future: provider.getCustomerById(sale.customerId!),
+                                    builder: (context, snapshot) {
+                                      final customerName = snapshot.data?.fullName ?? 'تحميل...';
+                                      return _buildMetaRow('العميل:', customerName);
+                                    },
+                                  ),
+                                ],
                                 if (sale.cashierName != null && sale.cashierName!.isNotEmpty) ...[
                                   const SizedBox(height: 8),
                                   _buildMetaRow('بواسطة (الكاشير):', sale.cashierName!),

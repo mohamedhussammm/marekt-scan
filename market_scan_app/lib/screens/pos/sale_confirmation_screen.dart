@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/providers/app_provider.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/models/models.dart';
@@ -62,9 +64,19 @@ class SaleConfirmationScreen extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: AppColors.border),
                   ),
-                  child: Column(
+                   child: Column(
                     children: [
                       _ReceiptRow(AppStrings.receiptNumber, sale.receiptNumber),
+                      if (sale.customerId != null) ...[
+                        const Divider(height: 16),
+                        FutureBuilder<Customer?>(
+                          future: context.read<AppProvider>().getCustomerById(sale.customerId!),
+                          builder: (context, snapshot) {
+                            final customerName = snapshot.data?.fullName ?? 'تحميل...';
+                            return _ReceiptRow('العميل', customerName);
+                          },
+                        ),
+                      ],
                       const Divider(height: 16),
                       ...sale.items.map((item) => _ReceiptRow(
                           '${item.product.name} × ${item.quantity}',

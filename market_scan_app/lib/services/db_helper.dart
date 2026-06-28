@@ -21,7 +21,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -72,6 +72,25 @@ CREATE TABLE transactions (
         if (oldVersion < 6) {
           try {
             await db.execute('ALTER TABLE transactions ADD COLUMN amount_paid REAL');
+          } catch (_) {}
+        }
+        if (oldVersion < 7) {
+          try {
+            await db.execute('''
+CREATE TABLE customers (
+  id TEXT PRIMARY KEY,
+  customerId TEXT NOT NULL,
+  fullName TEXT NOT NULL,
+  phoneNumber TEXT,
+  address TEXT
+)
+''');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE transactions ADD COLUMN customer_id TEXT');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE transactions ADD COLUMN change_returned REAL');
           } catch (_) {}
         }
       },
@@ -128,7 +147,19 @@ CREATE TABLE transactions (
   items_json TEXT NOT NULL,
   type TEXT DEFAULT 'sale',
   created_at TEXT NOT NULL,
-  is_offline INTEGER DEFAULT 0
+  is_offline INTEGER DEFAULT 0,
+  customer_id TEXT,
+  change_returned REAL
+)
+''');
+
+    await db.execute('''
+CREATE TABLE customers (
+  id TEXT PRIMARY KEY,
+  customerId TEXT NOT NULL,
+  fullName TEXT NOT NULL,
+  phoneNumber TEXT,
+  address TEXT
 )
 ''');
   }
@@ -204,6 +235,53 @@ CREATE TABLE transactions (
     await db.delete('products');
   }
 
+  // ─── CUSTOMER HELPER METHODS ─────────────────────────────────────────────
+
+  Future<void> insertCustomer(Customer customer) async {
+    final db = await instance.database;
+    await db.insert(
+      'customers',
+      customer.toJson(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> insertCustomersBatch(List<Customer> customers) async {
+    final db = await instance.database;
+    final batch = db.batch();
+    for (final c in customers) {
+      batch.insert(
+        'customers',
+        c.toJson(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Customer>> getAllCustomers() async {
+    final db = await instance.database;
+    final maps = await db.query('customers', orderBy: 'fullName ASC');
+    return maps.map((e) => Customer.fromJson(e)).toList();
+  }
+
+  Future<Customer?> getCustomerById(String customerId) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'customers',
+      where: 'customerId = ?',
+      whereArgs: [customerId],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return Customer.fromJson(maps.first);
+  }
+
+  Future<void> clearAllCustomers() async {
+    final db = await instance.database;
+    await db.delete('customers');
+  }
+
   // ─── OFFLINE QUEUE METHODS ───────────────────────────────────────────────
 
   Future<void> insertOfflineOp(String offlineId, String operation, Map<String, dynamic> payload) async {
@@ -259,6 +337,36 @@ CREATE TABLE transactions (
     return list;
   }
 
+  Future<void> updateOfflineExpense(String offlineId, double amount, String description, String category) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'offline_queue',
+      where: 'offline_id = ?',
+      whereArgs: [offlineId],
+    );
+    if (maps.isNotEmpty) {
+      final payload = Map<String, dynamic>.from(jsonDecode(maps.first['payload'] as String));
+      payload['amount'] = amount;
+      payload['description'] = description;
+      payload['category'] = category;
+      await db.update(
+        'offline_queue',
+        {'payload': jsonEncode(payload)},
+        where: 'offline_id = ?',
+        whereArgs: [offlineId],
+      );
+    }
+  }
+
+  Future<void> deleteOfflineExpense(String offlineId) async {
+    final db = await instance.database;
+    await db.delete(
+      'offline_queue',
+      where: 'offline_id = ?',
+      whereArgs: [offlineId],
+    );
+  }
+
   Future<void> deleteOfflineOp(int id) async {
     final db = await instance.database;
     await db.delete('offline_queue', where: 'id = ?', whereArgs: [id]);
@@ -301,6 +409,8 @@ CREATE TABLE transactions (
     String type = 'sale',
     required DateTime createdAt,
     required bool isOffline,
+    String? customerId,
+    double? changeReturned,
   }) async {
     final db = await instance.database;
     await db.insert(
@@ -316,6 +426,8 @@ CREATE TABLE transactions (
         'type': type,
         'created_at': createdAt.toIso8601String(),
         'is_offline': isOffline ? 1 : 0,
+        'customer_id': customerId,
+        'change_returned': changeReturned,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -352,6 +464,16 @@ CREATE TABLE transactions (
   Future<void> clearAllTransactions() async {
     final db = await instance.database;
     await db.delete('transactions');
+  }
+
+  Future<List<Map<String, dynamic>>> getLocalTransactionsForCustomer(String customerId) async {
+    final db = await instance.database;
+    return await db.query(
+      'transactions',
+      where: 'customer_id = ?',
+      whereArgs: [customerId],
+      orderBy: 'created_at DESC',
+    );
   }
 
   Future close() async {
