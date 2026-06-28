@@ -38,10 +38,7 @@ class _ReportsScreenState extends State<ReportsScreen>
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text(AppStrings.reportsTitle),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+        automaticallyImplyLeading: false,
       ),
       body: RefreshIndicator(
         onRefresh: () async => provider.loadDashboardStats(),
